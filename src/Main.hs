@@ -199,15 +199,14 @@ pushMovObjs
     -- ^ Old world
   -> World
     -- ^ New world
-pushMovObjs mbDelay amount interval obj = schedEvents <>~ newEvents
+pushMovObjs mbDelay amount interval obj world = world & schedEvents <>~ newEvents
   where
     newEvents :: SchedEventHeap
     newEvents = Heap.fromList $
-                map ( (\time' -> Heap.Entry time' (movingObjects <>~ [obj])) .
-                      (+ fromMaybe 0 mbDelay) .
-                      (+ _globalTime world) .
-                      (* interval)
-                    ) [0..(amount - 1)]
+                  [0..(amount - 1)] &
+                    traverse *~ interval &
+                    traverse +~ _globalTime world  + fromMaybe 0 mbDelay &
+                    traverse %~ (\time' -> Heap.Entry time' (movingObjects <>~ [obj]))
 
 --------------------------------------------------------------------------------
 
@@ -238,9 +237,7 @@ registerLevelEvents world =
       schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
 
 nextLevel :: World -> World
-nextLevel world =
-  world & registerLevelEvents
-        . (level +~ 1)
+nextLevel = registerLevelEvents . (level +~ 1)
 
 initWorld :: Assets -> World
 initWorld assets = World
