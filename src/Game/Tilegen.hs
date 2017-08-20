@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Tilegen where
+module Game.Tilegen where
 
 --------------------------------------------------------------------------------
 import           Data.Functor.Identity    (runIdentity)
@@ -15,8 +15,8 @@ import qualified Data.Map                 as Map
 import           Control.Lens
 import           Control.Lens.Operators
 --------------------------------------------------------------------------------
-import           Assets
-import           Types
+import           Game.Assets
+import           Game.Types
 --------------------------------------------------------------------------------
 
 data TilegenState = TilegenState
@@ -40,13 +40,6 @@ execTilegen assets tilegen = runIdentity $ execStateT (runTilegenM tilegen) init
       , _tileMap = Map.empty
       }
 
-class HasPicture m where
-  getPicture :: m -> Picture
-
-instance HasPicture UIObject where
-  getPicture (Floor _ pic) = pic
-  getPicture (UITower (Tower _ pic)) = pic
-   
 squareTiles :: UIObject -> (Int, Int) -> Int -> TilegenM ()
 squareTiles obj startPos sideLength = rectTiles obj startPos sideLength sideLength
 

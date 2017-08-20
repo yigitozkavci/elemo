@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Assets where
+module Game.Assets where
 
 --------------------------------------------------------------------------------
 import           Graphics.Gloss

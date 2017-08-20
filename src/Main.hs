@@ -22,12 +22,13 @@ import qualified Data.Heap                    as Heap
 import           Data.Foldable                (toList)
 import           Control.Zipper               (farthest)
 --------------------------------------------------------------------------------
-import           Utils
-import           Tilegen                      hiding (_tileMap) -- TODO: fix
-import           Assets
-import           World
-import           Types
-import           GUI
+import           Game.Utils
+import           Game.Tilegen                 hiding (_tileMap) -- TODO: fix
+import           Game.Assets
+import           Game.World
+import           Game.Types
+import           Game.GUI
+import           Data.PreservedMap
 --------------------------------------------------------------------------------
 
 tilemapToPicture :: TileMap -> Picture
@@ -77,6 +78,7 @@ gDisplay world =
 
     builtTowers' :: Picture
     builtTowers' = tilemapToPicture (_builtTowers world)
+    
 --------------------------------------------------------------------------------
 
 gUpdate :: Float -> World -> IO World
@@ -87,6 +89,7 @@ gUpdate _ world =
     return $ world & (levelPic .~ levelPic')
                    . (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
                    . (movingObjects %~ modifyMOs)
+                   -- . Map.foldl towerHandleProjectile world (_wTileMap world)
                    . (globalTime +~ 1)
                    . farthest consumeSchedEvent -- Consume as much event as possible.
   where
@@ -104,15 +107,24 @@ gUpdate _ world =
         | otherwise -> Nothing
       Nothing -> Nothing
 
+    towerHandleProjectile :: World -> UIObject -> World
+    towerHandleProjectile world (UITower tower) = world
+    towerHandleProjectile world _ = world
+      
 --------------------------------------------------------------------------------
 
+moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
+moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
+  where
+    movVec = (tX - x, tY - y) & both %~ sig
+
 projectile :: (World -> Maybe MovingObject) -> MovingVecIterator
-projectile getObj world pic speec ((x, y), dir) =
-  case getObj world of
+projectile getTarget world pic speec ((x, y), dir) =
+  case getTarget world of
     Nothing -> Nothing -- When target is lost, this projectile should also disappear
-    Just movObj -> let ((targetX, targetY), dir) = _currVec movObj
+    Just target -> let ((targetX, targetY), _dir) = _currVec target
                    in
-                     Just ((x, y), dir)
+                     Just (moveTowards (x, y) (targetX, targetY), dir)
 
 tileFollower :: Picture -> MovingVecIterator
 tileFollower tile world _pic speed ((x, y), dir) =

@@ -1,14 +1,17 @@
-module GUI where
+module Game.GUI where
 
+--------------------------------------------------------------------------------
 import qualified Data.Sequence as Seq
 import           Graphics.Gloss
-import           Assets
 import           Control.Lens.Operators
-import           Tilegen
 import           Data.Foldable          (forM_)
-import           Types
 import qualified Data.Map      as Map
-import Control.Monad.State.Lazy
+import           Control.Monad.State.Lazy
+--------------------------------------------------------------------------------
+import           Game.Tilegen
+import           Game.Types
+import           Game.Assets
+--------------------------------------------------------------------------------
 
 data GUIState = GUIState
   { _guiTowers :: Seq.Seq Tower

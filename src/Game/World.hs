@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module World where
+module Game.World where
 
 --------------------------------------------------------------------------------
 import           Control.Lens
@@ -10,12 +10,12 @@ import qualified Data.Map       as Map
 import           Data.Monoid    ((<>))
 import           Control.Monad.State.Lazy
 --------------------------------------------------------------------------------
-import           Assets
-import           Tilegen
-import           Types
-import           GUI
+import           Game.Assets
+import           Game.Tilegen
+import           Game.Types
+import           Game.GUI
 --------------------------------------------------------------------------------
-  
+
 data SelectorState =
     MouseFree
   | SelectedItem Tower

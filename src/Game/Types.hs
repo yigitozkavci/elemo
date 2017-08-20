@@ -1,7 +1,10 @@
-module Types where
+module Game.Types where
 
+--------------------------------------------------------------------------------
 import qualified Data.Map       as Map
 import           Graphics.Gloss
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 data Tower = Tower
   { _damage :: Int
@@ -12,6 +15,13 @@ data UIObject =
     Floor Bool Picture -- (Floor isPlacable picture)
   | UITower Tower
   deriving (Show)
+
+class HasPicture m where
+  getPicture :: m -> Picture
+
+instance HasPicture UIObject where
+  getPicture (Floor _ pic) = pic
+  getPicture (UITower (Tower _ pic)) = pic
 
 type TileMap = Map.Map (Int, Int) UIObject
 type GlobalTime = Int -- In miliseconds
