@@ -28,7 +28,7 @@ import           Game.Assets
 import           Game.World
 import           Game.Types
 import           Game.GUI
-import           Data.PreservedMap
+import qualified Data.PreservedMap            as PM
 --------------------------------------------------------------------------------
 
 tilemapToPicture :: TileMap -> Picture
@@ -71,10 +71,10 @@ gDisplay world =
                                 )
 
     movingObjs :: Picture
-    movingObjs = mconcat . map translateImg $ world & toListOf (movingObjects . traverse . imgAndPos)
+    movingObjs = mconcat . map (translateImg . imgAndPos) . PM.elems $ _movingObjects world
 
-    imgAndPos :: Getter MovingObject (Position, Picture)
-    imgAndPos = runGetter $ (,) <$> Getter (currVec . _1) <*> Getter moPicture
+    imgAndPos :: MovingObject -> (Position, Picture)
+    imgAndPos mo = (fst (_currVec mo), _moPicture mo)
 
     builtTowers' :: Picture
     builtTowers' = tilemapToPicture (_builtTowers world)
@@ -93,12 +93,13 @@ gUpdate _ world =
                    . (globalTime +~ 1)
                    . farthest consumeSchedEvent -- Consume as much event as possible.
   where
-    modifyMOs :: [MovingObject] -> [MovingObject]
-    modifyMOs [] = []
-    modifyMOs (MovingObject pic speed vec f:xs) =
-      case f world pic speed vec of
-        Nothing -> modifyMOs xs
-        Just newVec -> MovingObject pic speed newVec f : modifyMOs xs
+    modifyMOs :: PM.Map MovingObject -> PM.Map MovingObject
+    modifyMOs = PM.map $ \mo -> case mo of
+      Just (MovingObject pic speed vec f) ->
+        case f world pic speed vec of
+          Nothing -> Nothing
+          Just newVec -> Just (MovingObject pic speed newVec f)
+      Nothing -> Nothing
 
     consumeSchedEvent :: World -> Maybe World
     consumeSchedEvent world' = case Heap.viewMin (_schedEvents world') of
@@ -218,7 +219,7 @@ pushMovObjs mbDelay amount interval obj world = world & schedEvents <>~ newEvent
                   [0..(amount - 1)] &
                     traverse *~ interval &
                     traverse +~ _globalTime world  + fromMaybe 0 mbDelay &
-                    traverse %~ (\time' -> Heap.Entry time' (movingObjects <>~ [obj]))
+                    traverse %~ (\time' -> Heap.Entry time' (movingObjects %~ (PM.|>> obj)))
 
 --------------------------------------------------------------------------------
 
@@ -255,7 +256,7 @@ initWorld :: Assets -> World
 initWorld assets = World
   { _level         = 0
   , _levelPic      = Blank
-  , _movingObjects = []
+  , _movingObjects = PM.empty
   , _wTileMap      = Map.empty
   , _globalTime    = 0
   , _schedEvents   = Heap.empty

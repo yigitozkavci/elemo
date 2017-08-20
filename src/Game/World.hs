@@ -5,15 +5,16 @@ module Game.World where
 --------------------------------------------------------------------------------
 import           Control.Lens
 import           Graphics.Gloss
-import qualified Data.Heap      as Heap
-import qualified Data.Map       as Map
-import           Data.Monoid    ((<>))
+import qualified Data.Heap                as Heap
+import qualified Data.Map                 as Map
+import           Data.Monoid              ((<>))
 import           Control.Monad.State.Lazy
 --------------------------------------------------------------------------------
 import           Game.Assets
 import           Game.Tilegen
 import           Game.Types
 import           Game.GUI
+import qualified Data.PreservedMap        as PM
 --------------------------------------------------------------------------------
 
 data SelectorState =
@@ -25,7 +26,7 @@ type SchedEventHeap = Heap.Heap (Heap.Entry GlobalTime (World -> World))
 data World = World
   { _level         :: Int
   , _levelPic      :: Picture
-  , _movingObjects :: [MovingObject]
+  , _movingObjects :: PM.Map MovingObject
   , _wTileMap      :: TileMap
   , _globalTime    :: GlobalTime -- | In milisecs
   , _schedEvents   :: SchedEventHeap -- | Events can mutate the whole world, but
