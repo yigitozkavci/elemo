@@ -87,7 +87,7 @@ gUpdate _ world =
     return $ world & (levelPic .~ levelPic')
                    . (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
                    . (movingObjects %~ modifyMOs)
-                   . (globalTime %~ (+ 1))
+                   . (globalTime +~ 1)
                    . farthest consumeSchedEvent -- Consume as much event as possible.
   where
     modifyMOs :: [MovingObject] -> [MovingObject]
@@ -199,12 +199,11 @@ pushMovObjs
     -- ^ Old world
   -> World
     -- ^ New world
-pushMovObjs mbDelay amount interval obj world =
-  world & schedEvents %~ (`Heap.union` newEvents)
+pushMovObjs mbDelay amount interval obj = schedEvents <>~ newEvents
   where
     newEvents :: SchedEventHeap
     newEvents = Heap.fromList $
-                map ( (\time' -> Heap.Entry time' (movingObjects %~ (++ [obj]))) .
+                map ( (\time' -> Heap.Entry time' (movingObjects <>~ [obj])) .
                       (+ fromMaybe 0 mbDelay) .
                       (+ _globalTime world) .
                       (* interval)
@@ -236,12 +235,12 @@ registerLevelEvents world =
   where
     registerNextLevel :: Int -> World -> World
     registerNextLevel sec =
-      schedEvents %~ (Heap.Entry (sec + _globalTime world) (level %~ (+1)) `Heap.insert`)
+      schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
 
 nextLevel :: World -> World
 nextLevel world =
   world & registerLevelEvents
-        . (level %~ (+1))
+        . (level +~ 1)
 
 initWorld :: Assets -> World
 initWorld assets = World

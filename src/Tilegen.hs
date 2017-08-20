@@ -52,9 +52,8 @@ squareTiles obj startPos sideLength = rectTiles obj startPos sideLength sideLeng
 
 singleTile :: UIObject -> (Int, Int) -> TilegenM ()
 singleTile obj pos = do
-  let (x, y) = both *~ tileSize $ pos
-  let newPicture = Translate (fromIntegral x) (fromIntegral y) (getPicture obj)
-  picture %= (<> newPicture)
+  let (x, y) = pos & (both %~ fromIntegral) . (both *~ tileSize)
+  picture <>= Translate x y (getPicture obj)
   tileMap %= Map.insert pos obj -- We insert non-scaled position
 
 rectTiles :: UIObject -> (Int, Int) -> Int -> Int -> TilegenM ()
