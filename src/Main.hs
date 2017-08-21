@@ -81,6 +81,16 @@ gDisplay world =
     
 --------------------------------------------------------------------------------
 
+getShooterTowers :: World -> [(Position, UIObject)]
+getShooterTowers =
+  filter (\(pos, tower) ->
+    case tower of
+      UITower _ -> True
+      _ -> False
+  ) .
+  Map.assocs .
+  _wTileMap
+
 gUpdate :: Float -> World -> IO World
 gUpdate _ world =
   let (TilegenState levelPic' _ levelTileMap) = execTilegen (_assets world) (tilegenLevel (_level world))
@@ -89,29 +99,32 @@ gUpdate _ world =
     return $ world & (levelPic .~ levelPic')
                    . (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
                    . (movingObjects %~ modifyMOs)
-                   -- . Map.foldl towerHandleProjectile world (_wTileMap world)
+                   . handleTowerShooting
                    . (globalTime +~ 1)
                    . farthest consumeSchedEvent -- Consume as much event as possible.
   where
     modifyMOs :: PM.Map MovingObject -> PM.Map MovingObject
     modifyMOs = PM.map $ \mo -> case mo of
       Just (MovingObject pic speed vec f) ->
-        case f world pic speed vec of
+        case f (_globalTime world, _wTileMap world) pic speed vec of
           Nothing -> Nothing
           Just newVec -> Just (MovingObject pic speed newVec f)
       Nothing -> Nothing
 
     consumeSchedEvent :: World -> Maybe World
-    consumeSchedEvent world' = case Heap.viewMin (_schedEvents world') of
+    consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
       Just (Heap.Entry time f, newHeap)
-        | time == (world ^. globalTime) -> Just $ world' & (schedEvents .~ newHeap) . f
+        | time == (world ^. globalTime) -> Just $ world & (schedEvents .~ newHeap) . f
         | otherwise -> Nothing
       Nothing -> Nothing
 
-    towerHandleProjectile :: World -> UIObject -> World
-    towerHandleProjectile world (UITower tower) = world
-    towerHandleProjectile world _ = world
+    handleTowerShooting :: World -> World
+    handleTowerShooting world =
+      let towers = getShooterTowers world in
+      foldl handleTowerShooting' world towers
       
+    handleTowerShooting' :: World -> (Position, UIObject) -> World
+    handleTowerShooting' world ((x, y), UITower (Tower dmg pic lockState)) = world
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
@@ -119,16 +132,16 @@ moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
   where
     movVec = (tX - x, tY - y) & both %~ sig
 
-projectile :: (World -> Maybe MovingObject) -> MovingVecIterator
-projectile getTarget world pic speec ((x, y), dir) =
-  case getTarget world of
+projectile :: ((GlobalTime, TileMap) -> Maybe MovingObject) -> MovingVecIterator
+projectile getTarget worldInfo pic speec ((x, y), dir) =
+  case getTarget worldInfo of
     Nothing -> Nothing -- When target is lost, this projectile should also disappear
     Just target -> let ((targetX, targetY), _dir) = _currVec target
                    in
                      Just (moveTowards (x, y) (targetX, targetY), dir)
 
 tileFollower :: Picture -> MovingVecIterator
-tileFollower tile world _pic speed ((x, y), dir) =
+tileFollower tile (globalTime, tileMap) _pic speed ((x, y), dir) =
   if speedSync then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
       case availablePositions of
@@ -140,7 +153,7 @@ tileFollower tile world _pic speed ((x, y), dir) =
     Just ((x, y), dir)
   where
     speedSync :: Bool
-    speedSync = _globalTime world `mod` (gameFreq `div` speed) == 0
+    speedSync = globalTime `mod` (gameFreq `div` speed) == 0
 
     availablePositions =
       -- After filtering, direction addings must be cut. We don't want `tileSize` amount
@@ -150,7 +163,7 @@ tileFollower tile world _pic speed ((x, y), dir) =
       -- Accept only positions that are matching to the given tile type from points of interest
       filter (\((xPos, yPos), _) ->
         let indexPos = (xPos `div` tileSize, yPos `div` tileSize) in
-        case Map.lookup indexPos (_wTileMap world) of
+        case Map.lookup indexPos tileMap of
           Just obj
             | getPicture obj == tile -> True
           _ -> False

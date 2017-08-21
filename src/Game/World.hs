@@ -38,16 +38,6 @@ data World = World
   , _builtTowers   :: TileMap
   }
 
-
-type MovingVecIterator = World -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
-
-data MovingObject = MovingObject
-  { _moPicture   :: Picture
-  , _speed       :: Speed
-  , _currVec     :: (Position, Direction)
-  , _vecIterator :: MovingVecIterator
-  }
-
 makeLenses ''World
 makeLenses ''MovingObject
 

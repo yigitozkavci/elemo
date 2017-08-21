@@ -54,5 +54,9 @@ rectTiles obj (startX, startY) width height = do
   let coords = [ (x, y) | x <- [startX..(startX + width - 1)], y <- [startY..(startY + height - 1)] ] 
   forM_ coords (singleTile obj)
 
---------------------------------------------------------------------------------
+class HasPicture m where
+  getPicture :: m -> Picture
 
+instance HasPicture UIObject where
+  getPicture (Floor _ pic) = pic
+  getPicture (UITower (Tower _ pic _)) = pic

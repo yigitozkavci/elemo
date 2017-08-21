@@ -11,6 +11,7 @@ import           Control.Monad.State.Lazy
 import           Game.Tilegen
 import           Game.Types
 import           Game.Assets
+import           Game.Tower
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
@@ -21,8 +22,8 @@ data GUIState = GUIState
 initGUIState :: Assets -> GUIState
 initGUIState assets = GUIState
   { _guiTowers = Seq.fromList
-    [ Tower 10 (_whiteTower assets)
-    , Tower 20 (_greenTower assets)
+    [ Tower 10 (_whiteTower assets) TowerNonLocked
+    , Tower 20 (_greenTower assets) TowerNonLocked
     ]
   , _guiTowerPosMap = Map.empty
   }
