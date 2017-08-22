@@ -21,7 +21,8 @@ data SelectorState =
     MouseFree
   | SelectedItem Tower
 
-type SchedEventHeap = Heap.Heap (Heap.Entry GlobalTime (World -> World))
+type SchedEvent = Heap.Entry GlobalTime (World -> World)
+type SchedEventHeap = Heap.Heap SchedEvent
 
 data World = World
   { _level         :: Int

@@ -55,6 +55,7 @@ gDisplay world =
         <> movingObjs
         <> mouseCursor
         <> builtTowers'
+        <> towerLockings
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -78,7 +79,17 @@ gDisplay world =
 
     builtTowers' :: Picture
     builtTowers' = tilemapToPicture (_builtTowers world)
-    
+
+    towerLockings :: Picture
+    towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
+
+    towerLocking :: (Position, UIObject) -> Picture
+    towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
+      case PM.lookup moRef (_movingObjects world) of
+        Just mo -> Line [pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
+        Nothing -> error "mo does not exist" -- This should not necessarily throw an error. This is here for debug purposes.
+    towerLocking _ = mempty
+
 --------------------------------------------------------------------------------
 
 getShooterTowers :: World -> [(Position, UIObject)]
@@ -120,11 +131,24 @@ gUpdate _ world =
 
     handleTowerShooting :: World -> World
     handleTowerShooting world =
-      let towers = getShooterTowers world in
-      foldl handleTowerShooting' world towers
+      let towers = getShooterTowers world
+          eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
+            Map.map (\uiObj ->
+              case uiObj of
+                UITower tower -> let (tower', events) = handleTowerShooting' world tower in
+                  (UITower tower', events)
+                other -> (other, [])
+            )
+            (_wTileMap world)
+          newTileMap = Map.map fst eventedTowers
+          events = Heap.fromList $ concatMap snd $ Map.elems eventedTowers
+      in
+      world & wTileMap .~ newTileMap
+            & schedEvents <>~ events
       
-    handleTowerShooting' :: World -> (Position, UIObject) -> World
-    handleTowerShooting' world ((x, y), UITower (Tower dmg pic lockState)) = world
+    handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
+    handleTowerShooting' world (Tower dmg pic lockState) = (Tower dmg pic lockState, [])
+
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
