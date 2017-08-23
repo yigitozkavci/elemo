@@ -99,11 +99,11 @@ gUpdate _ world =
       (TilegenState _ _ guiTileMap)          = execTilegen (_assets world) (tilegenGUI (_guiState world))
   in
     return $ world & (levelPic .~ levelPic')
-                   . (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
-                   . (movingObjects %~ modifyMOs)
-                   . handleTowerShooting
-                   . (globalTime +~ 1)
-                   . farthest consumeSchedEvent -- Consume as much event as possible.
+                   & (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
+                   & (movingObjects %~ modifyMOs)
+                   & handleTowerShooting
+                   & (globalTime +~ 1)
+                   & farthest consumeSchedEvent -- Consume as much event as possible.
   where
     modifyMOs :: PM.Map MovingObject -> PM.Map MovingObject
     modifyMOs = PM.map $ \mo -> case mo of
@@ -116,7 +116,8 @@ gUpdate _ world =
     consumeSchedEvent :: World -> Maybe World
     consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
       Just (Heap.Entry time f, newHeap)
-        | time == (world ^. globalTime) -> Just $ world & (schedEvents .~ newHeap) . f
+        | time == (world ^. globalTime) -> Just $ world & (schedEvents .~ newHeap)
+                                                        & f
         | otherwise -> Nothing
       Nothing -> Nothing
 
@@ -226,7 +227,7 @@ eventHandler ev world =
         SelectedItem tower ->
           case guiClick pos world of
             Just (Floor True _) -> world & (builtTowers %~ Map.insert (adjustPosToIndex pos) (UITower tower))
-                                         . (selectorState .~ MouseFree)
+                                         & (selectorState .~ MouseFree)
             _ -> world
     EventKey (MouseButton RightButton) Down _modifiers _pos ->
       return $ world & selectorState .~ MouseFree
