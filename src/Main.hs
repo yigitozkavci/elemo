@@ -88,7 +88,7 @@ gDisplay world = do
     towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
       case PM.lookup moRef (_movingObjects world) of
         Just mo -> Line [pos & both %~ (fromIntegral . (* tileSize)), fst (_currVec mo) & both %~ fromIntegral]
-        Nothing -> error "mo does not exist" -- This tower shouldn't be locked into an object that no longer exists
+        Nothing -> mempty -- This is temporary second until tower finds a new target.
     towerLocking _ = mempty
 
 --------------------------------------------------------------------------------
@@ -137,12 +137,14 @@ gUpdate _ world =
             & schedEvents <>~ events
 
     handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
-    handleTowerShooting' world (Tower dmg pic lockState) =
+    handleTowerShooting' world (Tower dmg pic TowerNonLocked) =
       case PM.assocs (_movingObjects world) of
-        [] -> (Tower dmg pic lockState, [])
-        ((ref, _mo):_) -> let newLockState = TowerLocked ref in
-                          (Tower dmg pic newLockState, []) -- Emit event here
-
+        [] -> (Tower dmg pic TowerNonLocked, [])
+        ((moRef, _mo):_) -> (Tower dmg pic (TowerLocked moRef), []) -- TODO: Emit next shoot event here
+    handleTowerShooting' world (Tower dmg pic (TowerLocked moRef)) =
+      case PM.lookup moRef (_movingObjects world) of
+        Just _ -> (Tower dmg pic (TowerLocked moRef), [])
+        Nothing -> (Tower dmg pic TowerNonLocked, []) -- Moving object is lost, unlock it
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
