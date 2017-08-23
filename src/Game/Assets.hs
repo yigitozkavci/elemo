@@ -1,11 +1,11 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Game.Assets where
 
 --------------------------------------------------------------------------------
-import           Graphics.Gloss
 import           Control.Lens
+import           Graphics.Gloss
 --------------------------------------------------------------------------------
 
 data MOAssets = MOAssets

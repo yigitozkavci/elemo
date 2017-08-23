@@ -4,17 +4,17 @@ module Game.World where
 
 --------------------------------------------------------------------------------
 import           Control.Lens
-import           Graphics.Gloss
+import           Control.Monad.State.Lazy
 import qualified Data.Heap                as Heap
 import qualified Data.Map                 as Map
 import           Data.Monoid              ((<>))
-import           Control.Monad.State.Lazy
+import           Graphics.Gloss
 --------------------------------------------------------------------------------
+import qualified Data.PreservedMap        as PM
 import           Game.Assets
+import           Game.GUI
 import           Game.Tilegen
 import           Game.Types
-import           Game.GUI
-import qualified Data.PreservedMap        as PM
 --------------------------------------------------------------------------------
 
 data SelectorState =

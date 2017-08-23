@@ -4,10 +4,12 @@
 
 module Data.PreservedMap where
 
-import           Prelude         hiding (lookup)
-import qualified Data.IntMap     as IM
-import           Data.Maybe      (fromMaybe, fromJust, catMaybes, isJust)
-import           Control.Arrow   (first, second)
+--------------------------------------------------------------------------------
+import           Control.Arrow (first, second)
+import qualified Data.IntMap   as IM
+import           Data.Maybe    (catMaybes, fromJust, fromMaybe, isJust)
+import           Prelude       hiding (lookup)
+--------------------------------------------------------------------------------
 
 type Map v = IM.IntMap (Maybe v)
 

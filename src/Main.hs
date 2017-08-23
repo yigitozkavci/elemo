@@ -140,11 +140,11 @@ gUpdate _ world =
     handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
     handleTowerShooting' world (Tower dmg pic TowerNonLocked) =
       case PM.assocs (_movingObjects world) of
-        [] -> (Tower dmg pic TowerNonLocked, [])
+        []               -> (Tower dmg pic TowerNonLocked, [])
         ((moRef, _mo):_) -> (Tower dmg pic (TowerLocked moRef), []) -- TODO: Emit next shoot event here
     handleTowerShooting' world (Tower dmg pic (TowerLocked moRef)) =
       case PM.lookup moRef (_movingObjects world) of
-        Just _ -> (Tower dmg pic (TowerLocked moRef), [])
+        Just _  -> (Tower dmg pic (TowerLocked moRef), [])
         Nothing -> (Tower dmg pic TowerNonLocked, []) -- Moving object is lost, unlock it
 --------------------------------------------------------------------------------
 
