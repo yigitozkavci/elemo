@@ -6,7 +6,8 @@ module Data.PreservedMap where
 
 import           Prelude         hiding (lookup)
 import qualified Data.IntMap     as IM
-import           Data.Maybe      (fromMaybe, catMaybes)
+import           Data.Maybe      (fromMaybe, fromJust, catMaybes, isJust)
+import           Control.Arrow   (first, second)
 
 type Map v = IM.IntMap (Maybe v)
 
@@ -46,6 +47,9 @@ fromList = foldl (\m v -> snd (m |> v)) empty
 
 elems :: Map v -> [v]
 elems = catMaybes . IM.elems
+
+assocs :: Map v -> [(PMRef v, v)]
+assocs = Prelude.map (second fromJust) . Prelude.filter (isJust . snd) . Prelude.map (first PMRef) . IM.assocs
 
 map :: (Maybe v -> Maybe n) -> Map v -> Map n
 map = IM.map

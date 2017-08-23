@@ -40,7 +40,6 @@ data World = World
   }
 
 makeLenses ''World
-makeLenses ''MovingObject
 
 tilegenLevel :: Int -> TilegenM ()
 tilegenLevel 1 = do

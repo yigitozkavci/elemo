@@ -1,9 +1,13 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Game.Types where
 
 --------------------------------------------------------------------------------
+import           Control.Lens
 import qualified Data.Map          as Map
 import           Graphics.Gloss
 --------------------------------------------------------------------------------
+import           Data.Monoid       ((<>))
 import qualified Data.PreservedMap as PM
 --------------------------------------------------------------------------------
 
@@ -20,16 +24,10 @@ type Speed = Int
 tileSize :: Int
 tileSize = 28
 
-type MovingVecIterator = (GlobalTime, TileMap) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
-
-data MovingObject = MovingObject
-  { _moPicture   :: Picture
-  , _speed       :: Speed
-  , _currVec     :: (Position, Direction)
-  , _vecIterator :: MovingVecIterator
-  }
 
 type TileMap = Map.Map (Int, Int) UIObject
+
+type MovingVecIterator = (GlobalTime, TileMap) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
 
 data UIObject =
     Floor Bool Picture -- (Floor isPlacable picture)
@@ -42,8 +40,19 @@ data TowerLockState =
   deriving (Show)
 
 data Tower = Tower
-  { _damage :: Int
-  , _image :: Picture
+  { _damage    :: Int
+  , _image     :: Picture
   , _lockState :: TowerLockState
   } deriving (Show)
 
+data MovingObject = MovingObject
+  { _moPicture   :: Picture
+  , _speed       :: Speed
+  , _currVec     :: (Position, Direction)
+  , _vecIterator :: MovingVecIterator
+  }
+
+instance Show MovingObject where
+  show (MovingObject _pic speed currVec _it) = "MovingObject { speed = " <> show speed <> ", currVec = " <> show currVec <> " }"
+
+makeLenses ''MovingObject

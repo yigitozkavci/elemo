@@ -49,7 +49,8 @@ translateImg :: (Position, Picture) -> Picture
 translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
 
 gDisplay :: World -> IO Picture
-gDisplay world =
+gDisplay world = do
+  -- print $ _movingObjects world
   return $ paintGUI (_assets world) (_guiState world)
         <> _levelPic world
         <> movingObjs
@@ -86,21 +87,11 @@ gDisplay world =
     towerLocking :: (Position, UIObject) -> Picture
     towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
       case PM.lookup moRef (_movingObjects world) of
-        Just mo -> Line [pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
-        Nothing -> error "mo does not exist" -- This should not necessarily throw an error. This is here for debug purposes.
+        Just mo -> Line [pos & both %~ (fromIntegral . (* tileSize)), fst (_currVec mo) & both %~ fromIntegral]
+        Nothing -> error "mo does not exist" -- This tower shouldn't be locked into an object that no longer exists
     towerLocking _ = mempty
 
 --------------------------------------------------------------------------------
-
-getShooterTowers :: World -> [(Position, UIObject)]
-getShooterTowers =
-  filter (\(pos, tower) ->
-    case tower of
-      UITower _ -> True
-      _         -> False
-  ) .
-  Map.assocs .
-  _wTileMap
 
 gUpdate :: Float -> World -> IO World
 gUpdate _ world =
@@ -131,23 +122,26 @@ gUpdate _ world =
 
     handleTowerShooting :: World -> World
     handleTowerShooting world =
-      let towers = getShooterTowers world
-          eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
+      let eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
             Map.map (\uiObj ->
               case uiObj of
                 UITower tower -> let (tower', events) = handleTowerShooting' world tower in
                   (UITower tower', events)
                 other -> (other, [])
             )
-            (_wTileMap world)
-          newTileMap = Map.map fst eventedTowers
+            (_builtTowers world)
+          newBuiltTowers = Map.map fst eventedTowers
           events = Heap.fromList $ concatMap snd $ Map.elems eventedTowers
       in
-      world & wTileMap .~ newTileMap
+      world & builtTowers .~ newBuiltTowers
             & schedEvents <>~ events
 
     handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
-    handleTowerShooting' world (Tower dmg pic lockState) = (Tower dmg pic lockState, [])
+    handleTowerShooting' world (Tower dmg pic lockState) =
+      case PM.assocs (_movingObjects world) of
+        [] -> (Tower dmg pic lockState, [])
+        ((ref, _mo):_) -> let newLockState = TowerLocked ref in
+                          (Tower dmg pic newLockState, []) -- Emit event here
 
 --------------------------------------------------------------------------------
 
