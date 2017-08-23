@@ -5,30 +5,30 @@
 module Main where
 
 --------------------------------------------------------------------------------
-import           Graphics.Gloss hiding        (blank)
-import           Graphics.Gloss.Interface.IO.Game
-import           Data.Monoid
-import           Graphics.Gloss.Data.ViewPort (ViewPort)
-import           Prelude                      hiding (Left, Right)
+import           Control.Arrow                    (first, second, (&&&), (***))
 import           Control.Lens
 import           Control.Lens.Operators
-import           Control.Arrow                ((***), (&&&), first, second)
-import qualified Data.Map                     as Map
-import           Data.Maybe                   (mapMaybe, fromMaybe)
-import           Data.Tuple                   (swap)
 import           Control.Monad
-import           Data.Fixed                   (mod')
-import qualified Data.Heap                    as Heap
-import           Data.Foldable                (toList)
-import           Control.Zipper               (farthest)
+import           Control.Zipper                   (farthest)
+import           Data.Fixed                       (mod')
+import           Data.Foldable                    (toList)
+import qualified Data.Heap                        as Heap
+import qualified Data.Map                         as Map
+import           Data.Maybe                       (fromMaybe, mapMaybe)
+import           Data.Monoid
+import           Data.Tuple                       (swap)
+import           Graphics.Gloss                   hiding (blank)
+import           Graphics.Gloss.Data.ViewPort     (ViewPort)
+import           Graphics.Gloss.Interface.IO.Game
+import           Prelude                          hiding (Left, Right)
 --------------------------------------------------------------------------------
-import           Game.Utils
-import           Game.Tilegen                 hiding (_tileMap) -- TODO: fix
+import qualified Data.PreservedMap                as PM
 import           Game.Assets
-import           Game.World
-import           Game.Types
 import           Game.GUI
-import qualified Data.PreservedMap            as PM
+import           Game.Tilegen                     hiding (_tileMap)
+import           Game.Types
+import           Game.Utils
+import           Game.World
 --------------------------------------------------------------------------------
 
 tilemapToPicture :: TileMap -> Picture
@@ -97,7 +97,7 @@ getShooterTowers =
   filter (\(pos, tower) ->
     case tower of
       UITower _ -> True
-      _ -> False
+      _         -> False
   ) .
   Map.assocs .
   _wTileMap
@@ -118,7 +118,7 @@ gUpdate _ world =
     modifyMOs = PM.map $ \mo -> case mo of
       Just (MovingObject pic speed vec f) ->
         case f (_globalTime world, _wTileMap world) pic speed vec of
-          Nothing -> Nothing
+          Nothing     -> Nothing
           Just newVec -> Just (MovingObject pic speed newVec f)
       Nothing -> Nothing
 
@@ -145,7 +145,7 @@ gUpdate _ world =
       in
       world & wTileMap .~ newTileMap
             & schedEvents <>~ events
-      
+
     handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
     handleTowerShooting' world (Tower dmg pic lockState) = (Tower dmg pic lockState, [])
 
@@ -169,7 +169,7 @@ tileFollower tile (globalTime, tileMap) _pic speed ((x, y), dir) =
   if speedSync then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
       case availablePositions of
-        [] -> Nothing
+        []    -> Nothing
         (x:_) -> Just x
     else
       Just (tupleSum (x, y) dir, dir)
@@ -207,7 +207,7 @@ tileFollower tile (globalTime, tileMap) _pic speed ((x, y), dir) =
     posOfIntr :: [(Position, Direction)]
     posOfIntr = map (((+x) *** (+y)) &&& mapTuple (`div` tileSize)) $
       map (mapTuple (* tileSize))
-        [ dir 
+        [ dir
         , swap dir
         , both *~ -1 $ swap dir
         ]
@@ -223,7 +223,7 @@ eventHandler ev world =
     EventMotion pos -> return $ world & mousePos .~ pos
     EventKey (MouseButton LeftButton) Down _modifiers pos ->
       return $ case _selectorState world of
-        MouseFree -> 
+        MouseFree ->
           case guiClick pos world of
             Just (UITower tower) -> world & selectorState .~ SelectedItem tower
             _ -> world
@@ -263,7 +263,7 @@ pushMovObjs mbDelay amount interval obj world = world & schedEvents <>~ newEvent
 registerLevelEvents :: World -> World
 registerLevelEvents world =
   case _level world of
-    1 -> 
+    1 ->
       let centaur' = MovingObject
             { _moPicture   = world ^. assets . moAssets . centaur
             , _currVec     = ((28, 0), (1, 0))
