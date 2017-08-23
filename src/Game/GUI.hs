@@ -11,7 +11,6 @@ import           Control.Monad.State.Lazy
 import           Game.Tilegen
 import           Game.Types
 import           Game.Assets
-import           Game.Tower
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
