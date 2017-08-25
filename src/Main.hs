@@ -9,6 +9,7 @@ import           Control.Arrow                    (first, second, (&&&), (***))
 import           Control.Lens
 import           Control.Lens.Operators
 import           Control.Monad
+import           Control.Monad.State
 import           Control.Zipper                   (farthest)
 import           Data.Fixed                       (mod')
 import           Data.Foldable                    (toList)
@@ -242,49 +243,53 @@ pushMovObjs
     -- ^ Interval
   -> MovingObject
     -- ^ Type of objs
-  -> World
-    -- ^ Old world
-  -> World
-    -- ^ New world
-pushMovObjs mbDelay amount interval obj world = world & schedEvents <>~ newEvents
-  where
-    newEvents :: SchedEventHeap
-    newEvents = Heap.fromList $
-                  [0..(amount - 1)] &
+  -> State World ()
+pushMovObjs mbDelay amount interval obj = do
+  globalTime' <- gets _globalTime
+  let newEvents :: SchedEventHeap
+      newEvents = Heap.fromList $
+                    [0..(amount - 1)] &
                     traverse *~ interval &
-                    traverse +~ _globalTime world  + fromMaybe 0 mbDelay &
+                    traverse +~ globalTime' + fromMaybe 0 mbDelay &
                     traverse %~ (\time' -> Heap.Entry time' (movingObjects %~ (PM.|>> obj)))
+  schedEvents <>= newEvents
 
 --------------------------------------------------------------------------------
 
-registerLevelEvents :: World -> World
-registerLevelEvents world =
-  case _level world of
+registerLevelEvents :: State World ()
+registerLevelEvents = do
+  centaur <- gets (_centaur . _moAssets . _assets)
+  fireball <- gets (_fireball . _moAssets . _assets)
+  grass <- gets (_grass . _assets)
+  level <- gets _level
+  case level of
     1 ->
       let centaur' = MovingObject
-            { _moPicture   = world ^. assets . moAssets . centaur
+            { _moPicture   = centaur
             , _currVec     = ((28, 0), (1, 0))
             , _speed       = 50
-            , _vecIterator = tileFollower (world ^. assets . grass)
+            , _vecIterator = tileFollower grass
             }
           fireball' = MovingObject
-            { _moPicture   = world ^. assets . moAssets . fireball
+            { _moPicture   = fireball
             , _currVec     = ((28, 0), (1, 0))
             , _speed       = 100
-            , _vecIterator = tileFollower (world ^. assets . grass)
+            , _vecIterator = tileFollower grass
             }
       in
-        world & pushMovObjs (Just 2000) 5 500 centaur'
-              . pushMovObjs (Just 2000) 3 200 fireball'
+        pushMovObjs (Just 2000) 5 500 centaur' >>
+        pushMovObjs (Just 2000) 3 200 fireball'
               -- . registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
-  where
-    registerNextLevel :: Int -> World -> World
-    registerNextLevel sec =
-      schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
+  -- where
+  --   registerNextLevel :: Int -> World -> World
+  --   registerNextLevel sec =
+  --     schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
 
-nextLevel :: World -> World
-nextLevel = registerLevelEvents . (level +~ 1)
+nextLevel :: State World ()
+nextLevel = do
+  level += 1
+  registerLevelEvents
 
 initWorld :: Assets -> World
 initWorld assets = World
@@ -311,7 +316,7 @@ main = do
     (InWindow "Nice Window" (700, 700) (0, 0))
     white
     gameFreq
-    (nextLevel $ initWorld assets)
+    (execState nextLevel $ initWorld assets)
     gDisplay
     eventHandler
     gUpdate
