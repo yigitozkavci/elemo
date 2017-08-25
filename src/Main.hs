@@ -94,25 +94,33 @@ gDisplay world = do
 
 --------------------------------------------------------------------------------
 
-gUpdate :: Float -> World -> IO World
-gUpdate _ world =
-  let (TilegenState levelPic' _ levelTileMap) = execTilegen (_assets world) (tilegenLevel (_level world))
-      (TilegenState _ _ guiTileMap)          = execTilegen (_assets world) (tilegenGUI (_guiState world))
-  in
-    return $ world & (levelPic .~ levelPic')
-                   & (wTileMap .~ (_builtTowers world <> levelTileMap <> guiTileMap))
-                   & (movingObjects %~ modifyMOs)
-                   & handleTowerShooting
-                   & (globalTime +~ 1)
-                   & farthest consumeSchedEvent -- Consume as much event as possible.
+update :: State World ()
+update = do
+  assets' <- gets _assets
+  level' <- gets _level
+  guiState' <- gets _guiState
+  let (TilegenState levelPic' _ levelTileMap) = execTilegen assets' (tilegenLevel level')
+      (TilegenState _ _ guiTileMap)           = execTilegen assets' (tilegenGUI guiState')
+  levelPic .= levelPic'
+  builtTowers' <- gets _builtTowers
+  wTileMap .= (builtTowers' <> levelTileMap <> guiTileMap)
+  modifyMOs
+  handleTowerShooting
+  globalTime += 1
+  modify $ farthest consumeSchedEvent
+
   where
-    modifyMOs :: PM.Map MovingObject -> PM.Map MovingObject
-    modifyMOs = PM.map $ \mo -> case mo of
-      Just (MovingObject pic speed vec f) ->
-        case f (_globalTime world, _wTileMap world) pic speed vec of
-          Nothing     -> Nothing
-          Just newVec -> Just (MovingObject pic speed newVec f)
-      Nothing -> Nothing
+    modifyMOs :: State World ()
+    modifyMOs = do
+      globalTime' <- gets _globalTime
+      wTileMap' <- gets _wTileMap
+      movingObjects %= PM.map (\mo -> case mo of
+        Just (MovingObject pic speed vec f) ->
+          case f (globalTime', wTileMap') pic speed vec of
+            Nothing     -> Nothing
+            Just newVec -> Just (MovingObject pic speed newVec f)
+        Nothing -> Nothing
+                              ) -- FIXME: wtf is this
 
     consumeSchedEvent :: World -> Maybe World
     consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
@@ -122,8 +130,10 @@ gUpdate _ world =
         | otherwise -> Nothing
       Nothing -> Nothing
 
-    handleTowerShooting :: World -> World
-    handleTowerShooting world =
+    handleTowerShooting :: State World ()
+    handleTowerShooting = do
+      builtTowers' <- gets _builtTowers
+      world <- get
       let eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
             Map.map (\uiObj ->
               case uiObj of
@@ -131,12 +141,11 @@ gUpdate _ world =
                   (UITower tower', events)
                 other -> (other, [])
             )
-            (_builtTowers world)
+            builtTowers'
           newBuiltTowers = Map.map fst eventedTowers
           events = Heap.fromList $ concatMap snd $ Map.elems eventedTowers
-      in
-      world & builtTowers .~ newBuiltTowers
-            & schedEvents <>~ events
+      builtTowers .= newBuiltTowers
+      schedEvents <>= events
 
     handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
     handleTowerShooting' world (Tower dmg pic TowerNonLocked) =
@@ -147,6 +156,9 @@ gUpdate _ world =
       case PM.lookup moRef (_movingObjects world) of
         Just _  -> (Tower dmg pic (TowerLocked moRef), [])
         Nothing -> (Tower dmg pic TowerNonLocked, []) -- Moving object is lost, unlock it
+
+gUpdate :: Float -> World -> IO World
+gUpdate _ world = return $ execState update world
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
