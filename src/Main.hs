@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -- {-# LANGUAGE KindSignatures #-}
 -- {-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -8,6 +9,7 @@ module Main where
 import           Control.Arrow                    (first, second, (&&&), (***))
 import           Control.Lens
 import           Control.Lens.Operators
+import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.State
 import           Control.Zipper                   (farthest)
@@ -94,33 +96,41 @@ display world = paintGUI (_assets world) (_guiState world)
 
 --------------------------------------------------------------------------------
 
+tilegenLevel' :: State World ()
+tilegenLevel' = do
+  assets' <- use assets
+  level' <- use level
+  let (TilegenState levelPic' _ levelTileMap) = execTilegen assets' (tilegenLevel level')
+  levelPic .= levelPic'
+  wTileMap <>= levelTileMap
+
+tilegenGUI' :: State World ()
+tilegenGUI' = do
+  assets' <- use assets
+  guiState' <- use guiState
+  let (TilegenState _ _ guiTileMap) = execTilegen assets' (tilegenGUI guiState')
+  wTileMap <>= guiTileMap
+
 update :: State World ()
 update = do
-  assets' <- gets _assets
-  level' <- gets _level
-  guiState' <- gets _guiState
-  let (TilegenState levelPic' _ levelTileMap) = execTilegen assets' (tilegenLevel level')
-      (TilegenState _ _ guiTileMap)           = execTilegen assets' (tilegenGUI guiState')
-  levelPic .= levelPic'
-  builtTowers' <- gets _builtTowers
-  wTileMap .= (builtTowers' <> levelTileMap <> guiTileMap)
-  modifyMOs
-  handleTowerShooting
+  tilegenLevel'
+  tilegenGUI'
+  use builtTowers >>= (wTileMap <>=)
+  movingObjects <~ (PM.mapM runMO =<< use movingObjects)
+  towerShootings
   globalTime += 1
   modify $ farthest consumeSchedEvent
 
   where
-    modifyMOs :: State World ()
-    modifyMOs = do
-      world <- get
-      movingObjects %= PM.map (runMO world) -- FIXME: wtf is this
-
-    runMO :: World -> Maybe MovingObject -> Maybe MovingObject
-    runMO world (Just (MovingObject pic speed vec f)) =
-      case f (_globalTime world, _wTileMap world, _movingObjects world) pic speed vec of
-        Nothing     -> Nothing
-        Just newVec -> Just (MovingObject pic speed newVec f)
-    runMO _ Nothing = Nothing
+    runMO :: Maybe MovingObject -> State World (Maybe MovingObject)
+    runMO (Just (MovingObject pic speed vec f)) = do
+      time <- use globalTime
+      tileMap <- use wTileMap
+      mos <- use movingObjects
+      case f (time, tileMap, mos) pic speed vec of
+        Nothing     -> return Nothing
+        Just newVec -> return $ Just $ MovingObject pic speed newVec f
+    runMO Nothing = return Nothing
 
     consumeSchedEvent :: World -> Maybe World
     consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
@@ -130,41 +140,36 @@ update = do
         | otherwise -> Nothing
       Nothing -> Nothing
 
-    handleTowerShooting :: State World ()
-    handleTowerShooting = do
-      builtTowers' <- gets _builtTowers
-      world <- get
-      let eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
-            Map.mapWithKey (\pos uiObj ->
-              case uiObj of
-                UITower tower -> first UITower $ handleTowerShooting' world (pos, tower)
-                other -> (other, [])
-            )
-            builtTowers'
-      builtTowers .= Map.map fst eventedTowers
-      schedEvents <>= Heap.fromList (concatMap snd (Map.elems eventedTowers))
+    towerShootings :: State World ()
+    towerShootings = do
+      builtTowers' <- Map.assocs <$> gets _builtTowers
+      newTowers <- Map.fromList <$> forM builtTowers' towerShooting
+      builtTowers .= newTowers
 
-    handleTowerShooting' :: World -> (Position, Tower) -> (Tower, [SchedEvent])
-    handleTowerShooting' world (pos, Tower dmg pic TowerNonLocked) =
-      case PM.assocs (_movingObjects world) of
-        []               -> (Tower dmg pic TowerNonLocked, [])
-        ((moRef, _mo):_) -> let tower = Tower dmg pic (TowerLocked moRef) in
-                                (tower, [shootEvent world pos tower moRef])
-    handleTowerShooting' world (pos, Tower dmg pic (TowerLocked moRef)) =
-      case PM.lookup moRef (_movingObjects world) of
-        Just _  -> (Tower dmg pic (TowerLocked moRef), [])
-        Nothing -> (Tower dmg pic TowerNonLocked, []) -- Moving object is lost, unlock it
+    towerShooting :: (Position, UIObject) -> State World (Position, UIObject)
+    towerShooting (pos, tower@(UITower (Tower dmg pic lockState))) = do
+      movingObjects' <- gets _movingObjects
+      case lockState of
+        TowerNonLocked ->
+          case PM.assocs movingObjects' of
+            []               -> return (pos, tower) -- Tower non locked and there is no target
+            ((moRef, _mo):_) -> do                  -- Lock the tower
+              -- Register shoot event here
+              startShooting pos moRef
+              return (pos, UITower (Tower dmg pic (TowerLocked moRef)))
+        TowerLocked moRef ->
+          case PM.lookup moRef movingObjects' of
+            Nothing -> return (pos, UITower (Tower dmg pic TowerNonLocked)) -- Target is lost
+            Just _  -> return (pos, tower) -- Tower has a target and target is still alive
 
-shootEvent :: World -> Position -> Tower -> PM.PMRef MovingObject -> SchedEvent
-shootEvent world pos tower target =
-  Heap.Entry (_globalTime world + 5) (movingObjects %~ (PM.|>> fireballObj))
-    where
-        fireballObj = MovingObject
-          { _moPicture = world ^. assets . moAssets . fireball
-          , _speed = 50
-          , _currVec = (pos & both *~ tileSize, (1, 0))
-          , _vecIterator = projectile target
-          }
+startShooting :: Position -> PM.PMRef MovingObject -> State World ()
+startShooting pos target = do
+  globalTime' <- gets _globalTime
+  fireballPic <- use (assets . moAssets . fireball)
+  let scaledPos = pos & both *~ tileSize
+      fireballObj = MovingObject fireballPic 50 (scaledPos, (1, 0)) (projectile target)
+      event = movingObjects %~ (PM.|>> Just fireballObj)
+  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 5) event)
 
 updateIO :: Float -> World -> IO World
 updateIO _ world = return $ execState update world
@@ -272,23 +277,23 @@ pushMovObjs
     -- ^ Type of objs
   -> State World ()
 pushMovObjs mbDelay amount interval obj = do
-  globalTime' <- gets _globalTime
+  globalTime' <- use globalTime
   let newEvents :: SchedEventHeap
       newEvents = Heap.fromList $
                     [0..(amount - 1)] &
                     traverse *~ interval &
                     traverse +~ globalTime' + fromMaybe 0 mbDelay &
-                    traverse %~ (\time' -> Heap.Entry time' (movingObjects %~ (PM.|>> obj)))
+                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %~ (PM.|>> Just obj)))
   schedEvents <>= newEvents
 
 --------------------------------------------------------------------------------
 
 registerLevelEvents :: State World ()
 registerLevelEvents = do
-  centaur <- gets (_centaur . _moAssets . _assets)
-  fireball <- gets (_fireball . _moAssets . _assets)
-  grass <- gets (_grass . _assets)
-  level <- gets _level
+  centaur <- use $ assets . moAssets . centaur
+  fireball <- use $ assets . moAssets . fireball
+  grass <- use $ assets . grass
+  level <- use level
   case level of
     1 ->
       let centaur' = MovingObject
