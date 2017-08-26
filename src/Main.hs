@@ -1,12 +1,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
--- {-# LANGUAGE KindSignatures #-}
--- {-# LANGUAGE EmptyDataDecls #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
-import           Control.Arrow                    (first, second, (&&&), (***))
+import           Control.Arrow                    (first, second, (&&&), (***), (>>>))
 import           Control.Lens
 import           Control.Lens.Operators
 import           Control.Applicative
@@ -36,7 +36,7 @@ import           Game.World
 tilemapToPicture :: TileMap -> Picture
 tilemapToPicture = mconcat .
                    map ( translateImg .
-                         first (both *~ tileSize) .
+                         first scalePos .
                          second getPicture
                        ) .
                    Map.assocs
@@ -68,12 +68,12 @@ display world = paintGUI (_assets world) (_guiState world)
                           Translate mX mY (_image obj)
 
     adjustMouseToTile :: (Float, Float) -> (Float, Float)
-    adjustMouseToTile = both %~ ( fromIntegral .
-                                  (* tileSize) .
-                                  floor .
-                                  (/ fromIntegral tileSize) .
-                                  (+ (fromIntegral tileSize / 2))
-                                )
+    adjustMouseToTile = over both $
+            (+ (fromIntegral tileSize / 2))
+        >>> (/ fromIntegral tileSize)
+        >>> floor
+        >>> (* tileSize)
+        >>> fromIntegral
 
     movingObjs :: Picture
     movingObjs = mconcat . map (translateImg . imgAndPos) . PM.elems $ _movingObjects world
@@ -90,13 +90,17 @@ display world = paintGUI (_assets world) (_guiState world)
     towerLocking :: (Position, UIObject) -> Picture
     towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
       case PM.lookup moRef (_movingObjects world) of
-        Just mo -> Line [pos & both %~ (fromIntegral . (* tileSize)), fst (_currVec mo) & both %~ fromIntegral]
+        Just mo ->
+          Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
         Nothing -> mempty -- This is temporary second until tower finds a new target.
     towerLocking _ = mempty
 
 --------------------------------------------------------------------------------
 
-tilegenLevel' :: State World ()
+newtype SW a = SW { runSW :: State World a }
+  deriving (Functor, Applicative, Monad, MonadState World)
+
+tilegenLevel' :: SW ()
 tilegenLevel' = do
   assets' <- use assets
   level' <- use level
@@ -104,14 +108,14 @@ tilegenLevel' = do
   levelPic .= levelPic'
   wTileMap <>= levelTileMap
 
-tilegenGUI' :: State World ()
+tilegenGUI' :: SW ()
 tilegenGUI' = do
   assets' <- use assets
   guiState' <- use guiState
   let (TilegenState _ _ guiTileMap) = execTilegen assets' (tilegenGUI guiState')
   wTileMap <>= guiTileMap
 
-update :: State World ()
+update :: SW ()
 update = do
   tilegenLevel'
   tilegenGUI'
@@ -119,10 +123,10 @@ update = do
   movingObjects <~ (PM.mapM runMO =<< use movingObjects)
   towerShootings
   globalTime += 1
-  modify $ farthest consumeSchedEvent
+  consumeSchedEvents
 
   where
-    runMO :: Maybe MovingObject -> State World (Maybe MovingObject)
+    runMO :: Maybe MovingObject -> SW (Maybe MovingObject)
     runMO (Just (MovingObject pic speed vec f)) = do
       time <- use globalTime
       tileMap <- use wTileMap
@@ -132,21 +136,23 @@ update = do
         Just newVec -> return $ Just $ MovingObject pic speed newVec f
     runMO Nothing = return Nothing
 
-    consumeSchedEvent :: World -> Maybe World
-    consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
-      Just (Heap.Entry time f, newHeap)
-        | time == (world ^. globalTime) -> Just $ world & (schedEvents .~ newHeap)
-                                                        & f
-        | otherwise -> Nothing
-      Nothing -> Nothing
+    consumeSchedEvents :: SW ()
+    consumeSchedEvents = do
+      globalTime' <- use globalTime
+      ev <- Heap.viewMin <$> use schedEvents
+      forM_ ev $ \(Heap.Entry time f, newHeap) ->
+        when (time == globalTime') $ do
+          schedEvents .= newHeap
+          modify f -- Actual event mutation
+          consumeSchedEvents
 
-    towerShootings :: State World ()
+    towerShootings :: SW ()
     towerShootings = do
       builtTowers' <- Map.assocs <$> gets _builtTowers
       newTowers <- Map.fromList <$> forM builtTowers' towerShooting
       builtTowers .= newTowers
 
-    towerShooting :: (Position, UIObject) -> State World (Position, UIObject)
+    towerShooting :: (Position, UIObject) -> SW (Position, UIObject)
     towerShooting (pos, tower@(UITower (Tower dmg pic lockState))) = do
       movingObjects' <- gets _movingObjects
       case lockState of
@@ -162,17 +168,22 @@ update = do
             Nothing -> return (pos, UITower (Tower dmg pic TowerNonLocked)) -- Target is lost
             Just _  -> return (pos, tower) -- Tower has a target and target is still alive
 
-startShooting :: Position -> PM.PMRef MovingObject -> State World ()
+scalePos :: Position -> Position
+scalePos = both *~ tileSize
+
+unscalePos :: Position -> Position
+unscalePos = both %~ (`div` tileSize)
+
+startShooting :: Position -> PM.PMRef MovingObject -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let scaledPos = pos & both *~ tileSize
-      fireballObj = MovingObject fireballPic 50 (scaledPos, (1, 0)) (projectile target)
+  let fireballObj = MovingObject fireballPic 50 (scalePos pos, (1, 0)) (projectile target)
       event = movingObjects %~ (PM.|>> Just fireballObj)
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 5) event)
 
 updateIO :: Float -> World -> IO World
-updateIO _ world = return $ execState update world
+updateIO _ world = return $ execState (runSW update) world
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
@@ -234,37 +245,43 @@ tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
     -- o.oo
     -- ox.o
     -- o.oo
+    --
+    -- For arrow computation,  left computes positions, right computes directions
     posOfIntr :: [(Position, Direction)]
-    posOfIntr = map (((+x) *** (+y)) &&& mapTuple (`div` tileSize)) $
-      map (mapTuple (* tileSize))
+    posOfIntr =
+      map (scalePos >>> ((+x) *** (+y)) &&& unscalePos)
         [ dir
         , swap dir
-        , both *~ -1 $ swap dir
+        , dir & (swap >>> both *~ -1)
         ]
 
 --------------------------------------------------------------------------------
 
-guiClick :: (Float, Float) -> World -> Maybe UIObject
-guiClick pos world = Map.lookup (adjustPosToIndex pos) (_wTileMap world)
+guiClick :: (Float, Float) -> SW (Maybe UIObject)
+guiClick pos = Map.lookup (adjustPosToIndex pos) <$> use wTileMap
 
-eventHandler :: Event -> World -> IO World
-eventHandler ev world =
-  case ev of
-    EventMotion pos -> return $ world & mousePos .~ pos
-    EventKey (MouseButton LeftButton) Down _modifiers pos ->
-      return $ case _selectorState world of
-        MouseFree ->
-          case guiClick pos world of
-            Just (UITower tower) -> world & selectorState .~ SelectedItem tower
-            _ -> world
-        SelectedItem tower ->
-          case guiClick pos world of
-            Just (Floor True _) -> world & (builtTowers %~ Map.insert (adjustPosToIndex pos) (UITower tower))
-                                         & (selectorState .~ MouseFree)
-            _ -> world
-    EventKey (MouseButton RightButton) Down _modifiers _pos ->
-      return $ world & selectorState .~ MouseFree
-    _ -> return world
+eventHandler :: Event -> SW ()
+eventHandler = \case
+  EventMotion pos ->
+    mousePos .= pos
+  EventKey (MouseButton LeftButton) Down _modifiers pos ->
+    use selectorState >>= \case
+      MouseFree ->
+        guiClick pos >>= \case
+          Just (UITower tower) -> selectorState .= SelectedItem tower
+          _ -> return ()
+      SelectedItem tower ->
+        guiClick pos >>= \case
+          Just (Floor True _) -> do
+              builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
+              selectorState .= MouseFree
+          _ -> return ()
+  EventKey (MouseButton RightButton) Down _modifiers _pos ->
+    selectorState .= MouseFree
+  _ -> return ()
+
+eventHandlerIO :: Event -> World -> IO World
+eventHandlerIO ev world = return $ execState (runSW (eventHandler ev)) world
 
 pushMovObjs
   :: Maybe Int
@@ -275,7 +292,7 @@ pushMovObjs
     -- ^ Interval
   -> MovingObject
     -- ^ Type of objs
-  -> State World ()
+  -> SW ()
 pushMovObjs mbDelay amount interval obj = do
   globalTime' <- use globalTime
   let newEvents :: SchedEventHeap
@@ -288,7 +305,7 @@ pushMovObjs mbDelay amount interval obj = do
 
 --------------------------------------------------------------------------------
 
-registerLevelEvents :: State World ()
+registerLevelEvents :: SW ()
 registerLevelEvents = do
   centaur <- use $ assets . moAssets . centaur
   fireball <- use $ assets . moAssets . fireball
@@ -318,7 +335,7 @@ registerLevelEvents = do
   --   registerNextLevel sec =
   --     schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
 
-nextLevel :: State World ()
+nextLevel :: SW ()
 nextLevel = do
   level += 1
   registerLevelEvents
@@ -348,7 +365,7 @@ main = do
     (InWindow "Nice Window" (700, 700) (0, 0))
     white
     gameFreq
-    (execState nextLevel $ initWorld assets)
+    (execState (runSW nextLevel) $ initWorld assets)
     displayIO
-    eventHandler
+    eventHandlerIO
     updateIO
