@@ -173,13 +173,20 @@ scalePos = both *~ tileSize
 unscalePos :: Position -> Position
 unscalePos = both %~ (`div` tileSize)
 
+addEvent :: Int -> SW () -> SW ()
+addEvent time' ev = do
+  globalTime' <- use globalTime
+  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') ev)
+
 startShooting :: Position -> PM.PMRef MovingObject -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
   let fireballObj = MovingObject fireballPic 50 (scalePos pos, (1, 0)) (projectile target)
-      event = movingObjects %|>>= Just fireballObj
-  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 3000) event)
+      event = do
+        movingObjects %|>>= Just fireballObj
+        addEvent 2000 event
+  addEvent 500 event
 
 updateIO :: Float -> World -> IO World
 updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update
@@ -338,7 +345,7 @@ registerLevelEvents = do
 registerNextLevel :: Int -> SW ()
 registerNextLevel sec = do
   globalTime' <- use globalTime
-  schedEvents <>= Heap.singleton (Heap.Entry (sec + globalTime') (level += 1))
+  addEvent sec (level += 1)
 
 nextLevel :: SW ()
 nextLevel = do
