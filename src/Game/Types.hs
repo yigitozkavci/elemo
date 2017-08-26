@@ -27,7 +27,7 @@ tileSize = 28
 
 type TileMap = Map.Map (Int, Int) UIObject
 
-type MovingVecIterator = (GlobalTime, TileMap) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
+type MovingVecIterator = (GlobalTime, TileMap, PM.Map MovingObject) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
 
 data UIObject =
     Floor Bool Picture -- (Floor isPlacable picture)

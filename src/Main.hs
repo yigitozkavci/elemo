@@ -18,10 +18,9 @@ import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, mapMaybe)
 import           Data.Monoid
 import           Data.Tuple                       (swap)
-import           Graphics.Gloss                   hiding (blank)
+import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Data.ViewPort     (ViewPort)
 import           Graphics.Gloss.Interface.IO.Game
-import           Prelude                          hiding (Left, Right)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
@@ -49,15 +48,16 @@ adjustPosToIndex = both %~ ( floor .
 translateImg :: (Position, Picture) -> Picture
 translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
 
-gDisplay :: World -> IO Picture
-gDisplay world = do
-  -- print $ _movingObjects world
-  return $ paintGUI (_assets world) (_guiState world)
-        <> _levelPic world
-        <> movingObjs
-        <> mouseCursor
-        <> builtTowers'
-        <> towerLockings
+displayIO :: World -> IO Picture
+displayIO = return . display
+    
+display :: World -> Picture
+display world = paintGUI (_assets world) (_guiState world)
+             <> _levelPic world
+             <> movingObjs
+             <> mouseCursor
+             <> builtTowers'
+             <> towerLockings
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -112,15 +112,15 @@ update = do
   where
     modifyMOs :: State World ()
     modifyMOs = do
-      globalTime' <- gets _globalTime
-      wTileMap' <- gets _wTileMap
-      movingObjects %= PM.map (\mo -> case mo of
-        Just (MovingObject pic speed vec f) ->
-          case f (globalTime', wTileMap') pic speed vec of
-            Nothing     -> Nothing
-            Just newVec -> Just (MovingObject pic speed newVec f)
-        Nothing -> Nothing
-                              ) -- FIXME: wtf is this
+      world <- get
+      movingObjects %= PM.map (runMO world) -- FIXME: wtf is this
+
+    runMO :: World -> Maybe MovingObject -> Maybe MovingObject
+    runMO world (Just (MovingObject pic speed vec f)) =
+      case f (_globalTime world, _wTileMap world, _movingObjects world) pic speed vec of
+        Nothing     -> Nothing
+        Just newVec -> Just (MovingObject pic speed newVec f)
+    runMO _ Nothing = Nothing
 
     consumeSchedEvent :: World -> Maybe World
     consumeSchedEvent world = case Heap.viewMin (_schedEvents world) of
@@ -135,30 +135,39 @@ update = do
       builtTowers' <- gets _builtTowers
       world <- get
       let eventedTowers :: Map.Map Position (UIObject, [SchedEvent]) =
-            Map.map (\uiObj ->
+            Map.mapWithKey (\pos uiObj ->
               case uiObj of
-                UITower tower -> let (tower', events) = handleTowerShooting' world tower in
-                  (UITower tower', events)
+                UITower tower -> first UITower $ handleTowerShooting' world (pos, tower)
                 other -> (other, [])
             )
             builtTowers'
-          newBuiltTowers = Map.map fst eventedTowers
-          events = Heap.fromList $ concatMap snd $ Map.elems eventedTowers
-      builtTowers .= newBuiltTowers
-      schedEvents <>= events
+      builtTowers .= Map.map fst eventedTowers
+      schedEvents <>= Heap.fromList (concatMap snd (Map.elems eventedTowers))
 
-    handleTowerShooting' :: World -> Tower -> (Tower, [SchedEvent])
-    handleTowerShooting' world (Tower dmg pic TowerNonLocked) =
+    handleTowerShooting' :: World -> (Position, Tower) -> (Tower, [SchedEvent])
+    handleTowerShooting' world (pos, Tower dmg pic TowerNonLocked) =
       case PM.assocs (_movingObjects world) of
         []               -> (Tower dmg pic TowerNonLocked, [])
-        ((moRef, _mo):_) -> (Tower dmg pic (TowerLocked moRef), []) -- TODO: Emit next shoot event here
-    handleTowerShooting' world (Tower dmg pic (TowerLocked moRef)) =
+        ((moRef, _mo):_) -> let tower = Tower dmg pic (TowerLocked moRef) in
+                                (tower, [shootEvent world pos tower moRef])
+    handleTowerShooting' world (pos, Tower dmg pic (TowerLocked moRef)) =
       case PM.lookup moRef (_movingObjects world) of
         Just _  -> (Tower dmg pic (TowerLocked moRef), [])
         Nothing -> (Tower dmg pic TowerNonLocked, []) -- Moving object is lost, unlock it
 
-gUpdate :: Float -> World -> IO World
-gUpdate _ world = return $ execState update world
+shootEvent :: World -> Position -> Tower -> PM.PMRef MovingObject -> SchedEvent
+shootEvent world pos tower target =
+  Heap.Entry (_globalTime world + 5) (movingObjects %~ (PM.|>> fireballObj))
+    where
+        fireballObj = MovingObject
+          { _moPicture = world ^. assets . moAssets . fireball
+          , _speed = 50
+          , _currVec = (pos & both *~ tileSize, (1, 0))
+          , _vecIterator = projectile target
+          }
+
+updateIO :: Float -> World -> IO World
+updateIO _ world = return $ execState update world
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
@@ -166,16 +175,22 @@ moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
   where
     movVec = (tX - x, tY - y) & both %~ sig
 
-projectile :: ((GlobalTime, TileMap) -> Maybe MovingObject) -> MovingVecIterator
-projectile getTarget worldInfo pic speec ((x, y), dir) =
-  case getTarget worldInfo of
-    Nothing -> Nothing -- When target is lost, this projectile should also disappear
-    Just target -> let ((targetX, targetY), _dir) = _currVec target
-                   in
-                     Just (moveTowards (x, y) (targetX, targetY), dir)
+projectile :: PM.PMRef MovingObject -> MovingVecIterator
+projectile moRef (time, _, mos) pic speed ((x, y), dir) =
+  if speedSync then
+    case PM.lookup moRef mos of
+      Nothing -> Nothing -- When target is lost, this projectile should also disappear
+      Just target -> let ((targetX, targetY), _dir) = _currVec target
+                     in
+                       Just (moveTowards (x, y) (targetX, targetY), dir)
+  else
+    Just ((x, y), dir)
+  where
+    speedSync :: Bool
+    speedSync = time `mod` (gameFreq `div` speed) == 0
 
 tileFollower :: Picture -> MovingVecIterator
-tileFollower tile (globalTime, tileMap) _pic speed ((x, y), dir) =
+tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
   if speedSync then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
       case availablePositions of
@@ -187,7 +202,7 @@ tileFollower tile (globalTime, tileMap) _pic speed ((x, y), dir) =
     Just ((x, y), dir)
   where
     speedSync :: Bool
-    speedSync = globalTime `mod` (gameFreq `div` speed) == 0
+    speedSync = time `mod` (gameFreq `div` speed) == 0
 
     availablePositions =
       -- After filtering, direction addings must be cut. We don't want `tileSize` amount
@@ -329,6 +344,6 @@ main = do
     white
     gameFreq
     (execState nextLevel $ initWorld assets)
-    gDisplay
+    displayIO
     eventHandler
-    gUpdate
+    updateIO
