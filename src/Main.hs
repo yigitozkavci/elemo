@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
@@ -12,6 +13,8 @@ import           Control.Lens.Operators
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.State
+import           Control.Monad.Logger             (MonadLogger, LoggingT, runStdoutLoggingT)
+import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Zipper                   (farthest)
 import           Data.Fixed                       (mod')
 import           Data.Foldable                    (toList)
@@ -97,8 +100,8 @@ display world = paintGUI (_assets world) (_guiState world)
 
 --------------------------------------------------------------------------------
 
-newtype SW a = SW { runSW :: State World a }
-  deriving (Functor, Applicative, Monad, MonadState World)
+newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
+  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
 
 tilegenLevel' :: SW ()
 tilegenLevel' = do
@@ -183,7 +186,8 @@ startShooting pos target = do
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 5) event)
 
 updateIO :: Float -> World -> IO World
-updateIO _ world = return $ execState (runSW update) world
+updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW $ update
+
 --------------------------------------------------------------------------------
 
 moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
@@ -278,7 +282,8 @@ eventHandler = \case
   _ -> return ()
 
 eventHandlerIO :: Event -> World -> IO World
-eventHandlerIO ev world = return $ execState (runSW (eventHandler ev)) world
+eventHandlerIO ev world =
+  runStdoutLoggingT $ execStateT (runSW (eventHandler ev)) world
 
 pushMovObjs
   :: Maybe Int
@@ -292,6 +297,7 @@ pushMovObjs
   -> SW ()
 pushMovObjs mbDelay amount interval obj = do
   globalTime' <- use globalTime
+  logInfo "Pushing moving objects!"
   let newEvents :: SchedEventHeap
       newEvents = Heap.fromList $
                     [0..(amount - 1)] &
@@ -344,6 +350,7 @@ registerNextLevel sec = do
 nextLevel :: SW ()
 nextLevel = do
   level += 1
+  logInfo "whoa!"
   registerLevelEvents
 
 initWorld :: Assets -> World
@@ -367,11 +374,12 @@ gameFreq = 1000
 main :: IO ()
 main = do
   assets <- genAssets
+  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets) $ runSW nextLevel
   playIO
     (InWindow "Nice Window" (700, 700) (0, 0))
     white
     gameFreq
-    (execState (runSW nextLevel) $ initWorld assets)
+    initWorld'
     displayIO
     eventHandlerIO
     updateIO
