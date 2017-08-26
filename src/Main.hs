@@ -221,20 +221,17 @@ tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
     speedSync = time `mod` (gameFreq `div` speed) == 0
 
     availablePositions =
-      -- After filtering, direction addings must be cut. We don't want `tileSize` amount
-      -- of movement, afterall.
-      map (\(pos, dir) -> (tupleSum pos (mapTuple (* (-tileSize + 1)) dir), dir)) .
-
-      -- Accept only positions that are matching to the given tile type from points of interest
-      filter (\((xPos, yPos), _) ->
-        let indexPos = (xPos `div` tileSize, yPos `div` tileSize) in
-        case Map.lookup indexPos tileMap of
-          Just obj
-            | getPicture obj == tile -> True
-          _ -> False
-      ) $
-
-      posOfIntr
+        -- Accept only positions that are matching to the given tile type from points of interest
+        filter (\(pos', _) ->
+          case Map.lookup (unscalePos pos') tileMap of
+            Just obj
+              | getPicture obj == tile -> True
+            _ -> False
+        )
+        -- After filtering, direction addings must be cut. We don't want `tileSize` amount
+        -- of movement, afterall.
+        >>> map (\(pos, dir) -> (tupleSum pos (mapTuple (* (-tileSize + 1)) dir), dir))
+        $ posOfIntr
 
     -- Positions of interest. For position (28, 56) and direction (1, 0),
     -- possible positions will be [(56, 56), (28, 84), (28, 28)]
@@ -305,35 +302,44 @@ pushMovObjs mbDelay amount interval obj = do
 
 --------------------------------------------------------------------------------
 
+getFireball :: SW MovingObject
+getFireball = do
+  pic <- use $ assets . moAssets . fireball
+  grass <- use $ assets . grass
+  return MovingObject
+    { _moPicture   = pic
+    , _currVec     = ((28, 0), (1, 0))
+    , _speed       = 50
+    , _vecIterator = tileFollower grass
+    }
+
+getCentaur :: SW MovingObject
+getCentaur = do
+  pic <- use $ assets . moAssets . centaur
+  grass <- use $ assets . grass
+  return MovingObject
+    { _moPicture   = pic
+    , _currVec     = ((28, 0), (1, 0))
+    , _speed       = 50
+    , _vecIterator = tileFollower grass
+    }
+
 registerLevelEvents :: SW ()
 registerLevelEvents = do
-  centaur <- use $ assets . moAssets . centaur
   fireball <- use $ assets . moAssets . fireball
   grass <- use $ assets . grass
   level <- use level
   case level of
-    1 ->
-      let centaur' = MovingObject
-            { _moPicture   = centaur
-            , _currVec     = ((28, 0), (1, 0))
-            , _speed       = 50
-            , _vecIterator = tileFollower grass
-            }
-          fireball' = MovingObject
-            { _moPicture   = fireball
-            , _currVec     = ((28, 0), (1, 0))
-            , _speed       = 100
-            , _vecIterator = tileFollower grass
-            }
-      in
-        pushMovObjs (Just 2000) 5 500 centaur' >>
-        pushMovObjs (Just 2000) 3 200 fireball'
-              -- . registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
+    1 -> do
+      pushMovObjs (Just 2000) 5 500 =<< getCentaur
+      pushMovObjs (Just 2000) 5 200 =<< getFireball
+      registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
-  -- where
-  --   registerNextLevel :: Int -> World -> World
-  --   registerNextLevel sec =
-  --     schedEvents <>~ Heap.singleton (Heap.Entry (sec + _globalTime world) (level +~ 1))
+
+registerNextLevel :: Int -> SW ()
+registerNextLevel sec = do
+  globalTime' <- use globalTime
+  schedEvents <>= Heap.singleton (Heap.Entry (sec + globalTime') (level +~ 1))
 
 nextLevel :: SW ()
 nextLevel = do
