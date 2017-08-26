@@ -183,7 +183,7 @@ startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
   let fireballObj = MovingObject fireballPic 50 (scalePos pos, (1, 0)) (projectile target)
-      event = movingObjects %~ (PM.|>> Just fireballObj)
+      event = movingObjects %|>> Just fireballObj
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 5) event)
 
 updateIO :: Float -> World -> IO World
@@ -303,11 +303,14 @@ pushMovObjs mbDelay amount interval obj = do
       newEvents = Heap.fromList $
                     [0..(amount - 1)] &
                     traverse *~ interval &
-                    traverse +~ globalTime' + fromMaybe 0 mbDelay &
-                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %~ (PM.|>> Just obj)))
+                      traverse +~ globalTime' + fromMaybe 0 mbDelay &
+                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %|>> Just obj))
   schedEvents <>= newEvents
 
 --------------------------------------------------------------------------------
+
+(%|>>) :: ASetter s t (PM.Map v) (PM.Map v) -> Maybe v -> s -> t
+a %|>> b = a %~ (PM.|>> b)
 
 getFireball :: SW MovingObject
 getFireball = do
