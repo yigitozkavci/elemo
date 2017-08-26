@@ -1,7 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
@@ -11,10 +9,10 @@ import           Control.Arrow                    (first, second, (&&&), (***), 
 import           Control.Lens
 import           Control.Lens.Operators
 import           Control.Applicative
-import           Control.Monad
-import           Control.Monad.State
-import           Control.Monad.Logger             (MonadLogger, LoggingT, runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
+import           Control.Monad.State (execStateT, gets, modify)
+import           Control.Monad.Logger             (runStdoutLoggingT)
+import           Control.Monad
 import           Control.Zipper                   (farthest)
 import           Data.Fixed                       (mod')
 import           Data.Foldable                    (toList)
@@ -35,9 +33,6 @@ import           Game.Types
 import           Game.Utils
 import           Game.World
 --------------------------------------------------------------------------------
-
-newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
-  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
 
 tilemapToPicture :: TileMap -> Picture
 tilemapToPicture =
@@ -147,7 +142,7 @@ update = do
       forM_ ev $ \(Heap.Entry time f, newHeap) ->
         when (time == globalTime') $ do
           schedEvents .= newHeap
-          modify f -- Actual event mutation
+          f -- Actual event mutation
           consumeSchedEvents
 
     towerShootings :: SW ()
@@ -183,36 +178,36 @@ startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
   let fireballObj = MovingObject fireballPic 50 (scalePos pos, (1, 0)) (projectile target)
-      event = movingObjects %|>> Just fireballObj
-  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 5) event)
+      event = movingObjects %|>>= Just fireballObj
+  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + 3000) event)
 
 updateIO :: Float -> World -> IO World
-updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW $ update
+updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update
 
 --------------------------------------------------------------------------------
 
-moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
-moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
-  where
-    movVec = (tX - x, tY - y) & both %~ sig
+speedSync :: Int -> Int -> Bool
+speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
+-- TODO: Projectile-type moving objects don't need `dir` parameter. Maybe remove it?
 projectile :: PM.PMRef MovingObject -> MovingVecIterator
-projectile moRef (time, _, mos) pic speed ((x, y), dir) =
-  if speedSync then
+projectile moRef (time, _, mos) pic speed (pos@(x, y), dir) =
+  if speedSync time speed then
     case PM.lookup moRef mos of
       Nothing -> Nothing -- When target is lost, this projectile should also disappear
-      Just target -> let ((targetX, targetY), _dir) = _currVec target
-                     in
-                       Just (moveTowards (x, y) (targetX, targetY), dir)
+      Just target ->
+        let (targetPos@(targetX, targetY), _dir) = _currVec target in
+        if distance pos targetPos < 5
+          then
+            Nothing -- Decrease health of the target by tower damage here.
+          else
+            Just (moveTowards pos targetPos, dir)
   else
-    Just ((x, y), dir)
-  where
-    speedSync :: Bool
-    speedSync = time `mod` (gameFreq `div` speed) == 0
+    Just (pos, dir)
 
 tileFollower :: Picture -> MovingVecIterator
 tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
-  if speedSync then
+  if speedSync time speed then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
       case availablePositions of
         []    -> Nothing
@@ -222,9 +217,6 @@ tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
   else
     Just ((x, y), dir)
   where
-    speedSync :: Bool
-    speedSync = time `mod` (gameFreq `div` speed) == 0
-
     availablePositions =
         -- Accept only positions that are matching to the given tile type from points of interest
         filter (\(pos', _) ->
@@ -304,13 +296,10 @@ pushMovObjs mbDelay amount interval obj = do
                     [0..(amount - 1)] &
                     traverse *~ interval &
                       traverse +~ globalTime' + fromMaybe 0 mbDelay &
-                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %|>> Just obj))
+                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %|>>= Just obj))
   schedEvents <>= newEvents
 
 --------------------------------------------------------------------------------
-
-(%|>>) :: ASetter s t (PM.Map v) (PM.Map v) -> Maybe v -> s -> t
-a %|>> b = a %~ (PM.|>> b)
 
 getFireball :: SW MovingObject
 getFireball = do
@@ -342,14 +331,14 @@ registerLevelEvents = do
   case level of
     1 -> do
       pushMovObjs (Just 2000) 5 500 =<< getCentaur
-      pushMovObjs (Just 2000) 5 200 =<< getFireball
+      -- pushMovObjs (Just 2000) 5 200 =<< getFireball
       registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
 registerNextLevel :: Int -> SW ()
 registerNextLevel sec = do
   globalTime' <- use globalTime
-  schedEvents <>= Heap.singleton (Heap.Entry (sec + globalTime') (level +~ 1))
+  schedEvents <>= Heap.singleton (Heap.Entry (sec + globalTime') (level += 1))
 
 nextLevel :: SW ()
 nextLevel = do

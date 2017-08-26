@@ -1,4 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Game.World where
 
@@ -8,6 +10,8 @@ import           Control.Monad.State.Lazy
 import qualified Data.Heap                as Heap
 import qualified Data.Map                 as Map
 import           Data.Monoid              ((<>))
+import           Control.Monad.State
+import           Control.Monad.Logger             (MonadLogger, LoggingT, runStdoutLoggingT)
 import           Graphics.Gloss
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap        as PM
@@ -17,11 +21,14 @@ import           Game.Tilegen
 import           Game.Types
 --------------------------------------------------------------------------------
 
+newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
+  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
+
 data SelectorState =
     MouseFree
   | SelectedItem Tower
 
-type SchedEvent = Heap.Entry GlobalTime (World -> World)
+type SchedEvent = Heap.Entry GlobalTime (SW ())
 type SchedEventHeap = Heap.Heap SchedEvent
 
 data World = World
