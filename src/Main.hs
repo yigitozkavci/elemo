@@ -36,19 +36,23 @@ import           Game.Utils
 import           Game.World
 --------------------------------------------------------------------------------
 
+newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
+  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
+
 tilemapToPicture :: TileMap -> Picture
-tilemapToPicture = mconcat .
-                   map ( translateImg .
-                         first scalePos .
-                         second getPicture
-                       ) .
-                   Map.assocs
+tilemapToPicture =
+      Map.assocs
+  >>> map ( second getPicture
+        >>> first scalePos
+        >>> translateImg
+      )
+  >>> mconcat
 
 adjustPosToIndex :: (Float, Float) -> (Int, Int)
-adjustPosToIndex = both %~ ( floor .
-                             (/ fromIntegral tileSize) .
-                             (+ (fromIntegral tileSize / 2))
-                           )
+adjustPosToIndex = over both $
+      (+ (fromIntegral tileSize / 2))
+  >>> (/ fromIntegral tileSize)
+  >>> floor
 
 translateImg :: (Position, Picture) -> Picture
 translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
@@ -99,9 +103,6 @@ display world = paintGUI (_assets world) (_guiState world)
     towerLocking _ = mempty
 
 --------------------------------------------------------------------------------
-
-newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
-  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
 
 tilegenLevel' :: SW ()
 tilegenLevel' = do
