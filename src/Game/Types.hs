@@ -60,6 +60,7 @@ data World = World
   , _builtTowers   :: TileMap
   , _randGen       :: StdGen
   , _projectiles   :: PM.Map Projectile
+  , _playerInfo    :: PlayerInfo
   }
 
 newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
@@ -84,7 +85,7 @@ class HasPicture m where
 
 type TileMap = Map.Map (Int, Int) UIObject
 
-type MonsterIterator = (GlobalTime, TileMap) -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
+type MonsterIterator = Speed -> (Position, Direction) -> SW (Maybe (Position, Direction))
 
 type ProjectileIterator = (GlobalTime, PM.Map Monster) -> Speed -> Damage -> Position -> SW (Maybe Position)
 
@@ -168,6 +169,27 @@ scalePos = both *~ tileSize
 
 unscalePos :: Position -> Position
 unscalePos = both %~ (`div` tileSize)
+
+data PlayerInfo = PlayerInfo
+  { _lives :: Int
+  , _gold  :: Int
+  }
+makeLenses ''PlayerInfo
+
+smallText :: String -> Picture
+smallText = Scale 0.1 0.1 . Text
+
+smallTexts :: [(String, String)] -> Picture
+smallTexts [] = mempty
+smallTexts ((desc, val):xs) = 
+  Scale 0.1 0.1 (Text (desc <> ": " <> val))
+  <> Translate 0 (-20) (smallTexts xs)
+
+instance HasPicture PlayerInfo where
+  getPicture (PlayerInfo lives gold) = 
+    smallTexts [ ("Lives", show lives)
+               , ("Gold", show gold)
+               ]
 
 makeLenses ''Monster
 makeLenses ''Projectile

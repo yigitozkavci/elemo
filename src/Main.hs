@@ -10,6 +10,7 @@ import           Control.Arrow                    (first, second, (&&&), (***),
 import           Control.Lens
 import           Control.Lens.Operators
 import           Control.Monad
+import Control.Applicative.Extra
 import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
@@ -42,14 +43,15 @@ displayIO :: World -> IO Picture
 displayIO = return . display
 
 display :: World -> Picture
-display world = paintGUI (_assets world) (_guiState world)
+display world = paintGUI (world ^. assets) (world ^. guiState)
              <> _levelPic world
-             <> getPicture (_monsters world)
-             <> getPicture (_projectiles world)
+             <> getPicture (world ^. monsters)
+             <> getPicture (world ^. projectiles)
              <> mouseCursor
-             <> getPicture (_builtTowers world)
+             <> getPicture (world ^. builtTowers)
              <> towerLockings
              <> towerRanges
+             <> Translate (-300) 300 (getPicture (world ^. playerInfo))
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -114,10 +116,8 @@ update = do
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
     moveMonster Nothing = return Nothing
-    moveMonster (Just (Monster pic speed vec f tH h)) = do
-      time <- use globalTime
-      tileMap <- use wTileMap
-      case f (time, tileMap) speed vec of
+    moveMonster (Just (Monster pic speed vec f tH h)) =
+      f speed vec >>= \case
         Nothing     -> return Nothing
         Just newVec -> return $ Just $ Monster pic speed newVec f tH h
 
@@ -173,7 +173,6 @@ addEvent time' ev = do
 findClosestMonster :: Position -> Int -> SW (Maybe (PM.PMRef Monster))
 findClosestMonster pos range = do
   monsters' <- use monsters
-  logInfo "Finding the closest"
   return $ monsters' & findClosest
     where
       findClosest :: PM.Map Monster -> Maybe (PM.PMRef Monster)
@@ -232,7 +231,7 @@ projectile moRef (time, monsters) speed damage pos@(x, y) = do
         if distance pos targetPos < 5
           then
             Nothing <$ inflictDamage moRef damage
-          else do
+          else
             return $ Just (moveTowards rand pos targetPos)
   else
     return $ Just pos
@@ -251,22 +250,32 @@ inflictDamage moRef damage = do
           logInfo $ "Inflicted " <> T.pack (show damage) <> " damage to monster: " <> T.pack (show newMonster)
           return $ Just newMonster
 
+gameOver :: SW ()
+gameOver = error "Not implemented: gameOver"
+
+reduceLife :: SW ()
+reduceLife = do
+  lives' <- playerInfo . lives <-= 1
+  when (lives' <= 0) gameOver
+
 tileFollower :: Picture -> MonsterIterator
-tileFollower tile (time, tileMap) speed ((x, y), dir) =
+tileFollower tile speed ((x, y), dir) = do
+  tileMap' <- use wTileMap
+  time <- use globalTime
   if speedSync time speed then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
-      case availablePositions of
-        []    -> Nothing
-        (x:_) -> Just x
+      case availablePositions tileMap' of
+        []    -> Nothing <$ reduceLife
+        (x:_) -> return $ Just x
     else
-      Just (tupleSum (x, y) dir, dir)
+      return $ Just (tupleSum (x, y) dir, dir)
   else
-    Just ((x, y), dir)
+    return $ Just ((x, y), dir)
   where
-    availablePositions =
+    availablePositions tileMap' =
         -- Accept only positions that are matching to the given tile type from points of interest
         filter (\(pos', _) ->
-          case Map.lookup (unscalePos pos') tileMap of
+          case Map.lookup (unscalePos pos') tileMap' of
             Just obj
               | getPicture obj == tile -> True
             _ -> False
@@ -336,7 +345,7 @@ pushMonsters
   -> SW ()
 pushMonsters mbDelay amount interval obj = do
   globalTime' <- use globalTime
-  logInfo "Pushing moving objects!"
+  logInfo "Pushing monsters!"
   let intervals = map (* interval) [0..(amount - 1)]
       delay = fromMaybe 0 mbDelay
   forM_ intervals $ \i -> addEvent (i + delay) (monsters %|>>= Just obj)
@@ -392,6 +401,7 @@ initWorld assets randGen = World
   , _builtTowers   = Map.empty
   , _randGen       = randGen
   , _projectiles   = PM.empty
+  , _playerInfo    = PlayerInfo 10 100
   }
 
 gameFreq :: Int
