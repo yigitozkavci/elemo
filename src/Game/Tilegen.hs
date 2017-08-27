@@ -29,7 +29,7 @@ data TilegenState = TilegenState
 makeLenses ''TilegenState
 
 tilegenLevel :: Int -> TilegenM ()
-tilegenLevel 1 = do
+tilegenLevel _ = do
   assets <- gets _tAssets
   squareTiles (Floor True (assets ^. stone)) (1, 1) 9
   rectTiles (Floor False (assets ^. grass)) (1, 0) 10 1
@@ -38,7 +38,7 @@ tilegenLevel 1 = do
   rectTiles (Floor False (assets ^. grass)) (0, 6) 1 5
   singleTile (Floor False (assets ^. openDoor)) (0, 0)
   singleTile (Floor False (assets ^. closedDoor)) (0, 5)
-tilegenLevel level = error $ "Tilegen for level " <> show level <> " is not implemented."
+-- tilegenLevel level = error $ "Tilegen for level " <> show level <> " is not implemented."
 
 paintGUI :: Assets -> GUIState -> Picture
 paintGUI assets state =

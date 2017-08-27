@@ -338,14 +338,15 @@ eventHandler = \case
           _ -> return ()
       SelectedItem tower ->
         guiClick pos >>= \case
-          Just (Floor True _) ->
+          Just (Floor True tile) ->
             buyTower tower >>= \case
               True -> do
                 builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
+                wTileMap %= Map.insert (adjustPosToIndex pos) (Floor False tile)
                 selectorState .= MouseFree
               False -> do
                 alerts' <- use alerts
-                addAlert "Not enough gold!" >> logInfo (T.pack (show alerts')) 
+                addAlert "Not enough gold!"
           _ -> return ()
   EventKey (MouseButton RightButton) Down _modifiers _pos ->
     selectorState .= MouseFree
@@ -367,7 +368,6 @@ dequeue (Q.viewl -> _ Q.:< rem) = rem
 
 addAlert :: T.Text -> SW ()
 addAlert txt = do
-  logInfo "Adding alert"
   alerts %= (`enqueue` txt)
   addEvent 2000 $ alerts %= dequeue
 
@@ -383,7 +383,6 @@ pushMonsters
   -> SW ()
 pushMonsters mbDelay amount interval obj = do
   globalTime' <- use globalTime
-  logInfo "Pushing monsters!"
   let intervals = map (* interval) [0..(amount - 1)]
       delay = fromMaybe 0 mbDelay
   forM_ intervals $ \i -> addEvent (i + delay) (monsters %|>>= Just obj)
@@ -403,6 +402,9 @@ getCentaur = do
     , _health      = 120
     }
 
+giveGold :: Int -> SW ()
+giveGold amount = playerInfo . gold += amount
+
 registerLevelEvents :: SW ()
 registerLevelEvents = do
   fireball <- use $ assets . moAssets . fireball
@@ -410,14 +412,20 @@ registerLevelEvents = do
   level <- use level
   case level of
     1 -> do
-      pushMonsters (Just 500) 3 3000 =<< getCentaur
-      -- registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
+      pushMonsters (Just 1000) 3 500 =<< getCentaur
+      nextLevelIn 15000 -- Go to next level after 15 secs. (disabled for now)
+    2 -> do
+      pushMonsters (Just 500) 6 500 =<< getCentaur
+      giveGold 100
+      -- nextLevelIn 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
-registerNextLevel :: Int -> SW ()
-registerNextLevel sec = do
-  globalTime' <- use globalTime
-  addEvent sec (level += 1)
+nextLevelIn :: Int -> SW ()
+nextLevelIn sec = do
+  addAlert "Next level!"
+  addEvent sec $ do
+    level += 1
+    registerLevelEvents
 
 nextLevel :: SW ()
 nextLevel = do
