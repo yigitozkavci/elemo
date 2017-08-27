@@ -16,7 +16,7 @@ import           Control.Monad.State              (execStateT, gets, modify)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
 import qualified Data.Map                         as Map
-import           Data.Maybe                       (fromMaybe, mapMaybe)
+import           Data.Maybe                       (fromMaybe, mapMaybe, isJust)
 import           Data.Monoid                      (mempty, (<>))
 import qualified Data.Text                        as T
 import           Data.Tuple                       (swap)
@@ -180,14 +180,20 @@ getRandom = do
   randGen .= newGen
   return val
 
+targetExists :: PM.PMRef Monster -> SW Bool
+targetExists moRef =
+  isJust . PM.lookup moRef <$> use monsters
+
 startShooting :: Position -> PM.PMRef Monster -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
   let fireballObj = Projectile fireballPic 150 12 (scalePos pos) (projectile target)
-      event = do
-        projectiles %|>>= Just fireballObj
-        addEvent 1000 event
+      event = targetExists target >>= \case
+        True -> do
+          projectiles %|>>= Just fireballObj
+          addEvent 1000 event
+        False -> return () -- If target doesn't exist, don't schedule more shooting events
   addEvent 500 event
 
 updateIO :: Float -> World -> IO World
