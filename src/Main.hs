@@ -27,11 +27,9 @@ import           System.Random                    (StdGen, getStdGen, next)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
-import           Game.GUI
 import           Game.Tilegen                     hiding (_tileMap)
 import           Game.Types
 import           Game.Utils
-import           Game.World
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> (Int, Int)
