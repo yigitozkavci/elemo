@@ -25,4 +25,6 @@ executable Main
                        lens,
                        heaps,
                        zippers,
-                       random
+                       random,
+                       safe,
+                       text

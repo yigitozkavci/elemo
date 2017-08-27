@@ -17,7 +17,7 @@ import           Prelude       hiding (lookup)
 type Map v = IM.IntMap (Maybe v)
 
 newtype PMRef a = PMRef Int
-  deriving Show
+  deriving (Show, Eq)
 
 empty :: Map v
 empty = IM.empty
@@ -66,3 +66,14 @@ mapM f m' = (fromList . Prelude.map snd) <$> mapM' f (assocs m')
 mapM' :: Monad m => (Maybe v -> m (Maybe n)) -> [(PMRef a, Maybe v)] -> m [(PMRef a, Maybe n)]
 mapM' f [] = return []
 mapM' f ((ref, val):xs) = liftA2 (:) ((ref,) <$> f val) (mapM' f xs)
+
+mapMWithKey :: Monad m => (PMRef v -> Maybe v -> m (Maybe n)) -> Map v -> m (Map n)
+mapMWithKey f m' = (fromList . Prelude.map snd) <$> mapMWithKey' f (assocs m')
+
+mapMWithKey' :: Monad m => (PMRef v -> Maybe v -> m (Maybe n)) -> [(PMRef v, Maybe v)] -> m [(PMRef v, Maybe n)]
+mapMWithKey' f [] = return []
+mapMWithKey' f ((ref, val):xs) = liftA2 (:) ((ref,) <$> f ref val) (mapMWithKey' f xs)
+
+assocsJust :: Map v -> [(PMRef v, v)]
+assocsJust = Prelude.map (second fromJust) . filter (isJust . snd) . Prelude.map (first PMRef) . IM.assocs
+

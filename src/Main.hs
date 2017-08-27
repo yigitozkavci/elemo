@@ -14,12 +14,15 @@ import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
 import qualified Data.Heap                        as Heap
+import           Data.List                        (sortBy)
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
+import qualified Data.Text                        as T
 import           Data.Tuple                       (swap)
 import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Interface.IO.Game
+import           Safe                             (headMay)
 import           System.Random                    (StdGen, getStdGen, next)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
@@ -31,23 +34,11 @@ import           Game.Utils
 import           Game.World
 --------------------------------------------------------------------------------
 
-tilemapToPicture :: TileMap -> Picture
-tilemapToPicture =
-      Map.assocs
-  >>> map ( second getPicture
-        >>> first scalePos
-        >>> translateImg
-      )
-  >>> mconcat
-
 adjustPosToIndex :: (Float, Float) -> (Int, Int)
 adjustPosToIndex = over both $
       (+ (fromIntegral tileSize / 2))
   >>> (/ fromIntegral tileSize)
   >>> floor
-
-translateImg :: (Position, Picture) -> Picture
-translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
 
 displayIO :: World -> IO Picture
 displayIO = return . display
@@ -55,10 +46,10 @@ displayIO = return . display
 display :: World -> Picture
 display world = paintGUI (_assets world) (_guiState world)
              <> _levelPic world
-             <> monsters
-             <> projectiles
+             <> getPicture (_monsters world)
+             <> getPicture (_projectiles world)
              <> mouseCursor
-             <> builtTowers'
+             <> getPicture (_builtTowers world)
              <> towerLockings
   where
     mouseCursor :: Picture
@@ -74,15 +65,6 @@ display world = paintGUI (_assets world) (_guiState world)
         >>> floor
         >>> (* tileSize)
         >>> fromIntegral
-
-    monsters :: Picture
-    monsters = mconcat . map (translateImg . (fst . _currVec &&& _moPicture)) . PM.elems $ _monsters world
-
-    projectiles :: Picture
-    projectiles = mconcat . map (translateImg . (_projectilePosition &&& _projectilePicture)) . PM.elems $ _projectiles world
-
-    builtTowers' :: Picture
-    builtTowers' = tilemapToPicture (_builtTowers world)
 
     towerLockings :: Picture
     towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
@@ -126,21 +108,21 @@ update = do
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
     moveMonster Nothing = return Nothing
-    moveMonster (Just (Monster pic speed vec f)) = do
+    moveMonster (Just (Monster pic speed vec f tH h)) = do
       time <- use globalTime
       tileMap <- use wTileMap
       case f (time, tileMap) speed vec of
         Nothing     -> return Nothing
-        Just newVec -> return $ Just $ Monster pic speed newVec f
+        Just newVec -> return $ Just $ Monster pic speed newVec f tH h
 
     moveProjectile :: Maybe Projectile -> SW (Maybe Projectile)
     moveProjectile Nothing = return Nothing
-    moveProjectile (Just (Projectile pic speed pos f)) = do
+    moveProjectile (Just (Projectile pic speed damage pos f)) = do
       time <- use globalTime
       mos <- use monsters
-      case f (time, mos) speed pos of
-        Nothing -> return Nothing
-        Just newPos -> return $ Just $ Projectile pic speed newPos f
+      f (time, mos) speed damage pos >>= \case
+        Nothing     -> return Nothing
+        Just newPos -> return $ Just $ Projectile pic speed damage newPos f
 
     consumeSchedEvents :: SW ()
     consumeSchedEvents = do
@@ -163,9 +145,9 @@ update = do
       monsters' <- use monsters
       case lockState of
         TowerNonLocked ->
-          case PM.assocs monsters' of
-            []               -> return (pos, tower) -- Tower non locked and there is no target
-            ((moRef, _mo):_) -> do                  -- Lock the tower
+          findClosestMonster pos >>= \case
+            Nothing    -> return (pos, tower) -- Tower non locked and couldn't find a target
+            Just moRef -> do                  -- Lock the tower
               -- Register shoot event here
               startShooting pos moRef
               return (pos, UITower (Tower dmg pic (TowerLocked moRef)))
@@ -174,16 +156,22 @@ update = do
             Nothing -> return (pos, UITower (Tower dmg pic TowerNonLocked)) -- Target is lost
             Just _  -> return (pos, tower) -- Tower has a target and target is still alive
 
-scalePos :: Position -> Position
-scalePos = both *~ tileSize
-
-unscalePos :: Position -> Position
-unscalePos = both %~ (`div` tileSize)
-
 addEvent :: Int -> SW () -> SW ()
 addEvent time' ev = do
   globalTime' <- use globalTime
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') ev)
+
+findClosestMonster :: Position -> SW (Maybe (PM.PMRef Monster))
+findClosestMonster pos = do
+  monsters' <- use monsters
+  return $ monsters' & findClosest
+    where
+      findClosest :: PM.Map Monster -> Maybe (PM.PMRef Monster)
+      findClosest = PM.assocsJust
+        >>> map (second (fst . _currVec)) -- [(ref, pos)]
+        >>> sortBy (\(_, p1) (_, p2) -> compare (distance pos p1) (distance pos p2)) -- Sorted [(ref, pos)]
+        >>> headMay -- Maybe (ref, pos)
+        >=> Just . fst -- Maybe ref
 
 getRandom :: SW Int
 getRandom = do
@@ -196,10 +184,10 @@ startShooting :: Position -> PM.PMRef Monster -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = Projectile fireballPic 150 (scalePos pos) (projectile target)
+  let fireballObj = Projectile fireballPic 150 12 (scalePos pos) (projectile target)
       event = do
         projectiles %|>>= Just fireballObj
-        addEvent 2000 event
+        addEvent 1000 event
   addEvent 500 event
 
 updateIO :: Float -> World -> IO World
@@ -210,21 +198,34 @@ updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update
 speedSync :: Int -> Int -> Bool
 speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
--- TODO: Projectile-type moving objects don't need `dir` parameter. Maybe remove it?
 projectile :: PM.PMRef Monster -> ProjectileIterator
-projectile moRef (time, monsters) speed pos@(x, y) =
+projectile moRef (time, monsters) speed damage pos@(x, y) =
   if speedSync time speed then
     case PM.lookup moRef monsters of
-      Nothing -> Nothing -- When target is lost, this projectile should also disappear
+      Nothing -> return Nothing -- When target is lost, this projectile should also disappear
       Just target ->
         let (targetPos@(targetX, targetY), _dir) = _currVec target in
         if distance pos targetPos < 5
           then
-            Nothing -- Decrease health of the target by tower damage here.
+            Nothing <$ inflictDamage moRef damage
           else
-            Just (moveTowards pos targetPos)
+            return $ Just (moveTowards pos targetPos)
   else
-    Just pos
+    return $ Just pos
+
+inflictDamage :: PM.PMRef Monster -> Damage -> SW ()
+inflictDamage moRef damage = do
+  mos <- use monsters
+  monsters <~ PM.mapMWithKey (\ref' mbmon -> if ref' == moRef then inflictDamage' mbmon else return mbmon) mos
+    where
+      inflictDamage' :: Maybe Monster -> SW (Maybe Monster)
+      inflictDamage' Nothing = return Nothing
+      inflictDamage' (Just monster)
+        | monster ^. health < damage = return Nothing -- Monster dies
+        | otherwise = do
+          let newMonster = monster & health -~ damage
+          logInfo $ "Inflicted " <> T.pack (show damage) <> " damage to monster: " <> T.pack (show newMonster)
+          return $ Just newMonster
 
 tileFollower :: Picture -> MonsterIterator
 tileFollower tile (time, tileMap) speed ((x, y), dir) =
@@ -299,7 +300,7 @@ eventHandlerIO :: Event -> World -> IO World
 eventHandlerIO ev world =
   runStdoutLoggingT $ execStateT (runSW (eventHandler ev)) world
 
-pushMovObjs
+pushMonsters
   :: Maybe Int
     -- ^ Base delay (optional)
   -> Int
@@ -309,16 +310,12 @@ pushMovObjs
   -> Monster
     -- ^ Type of objs
   -> SW ()
-pushMovObjs mbDelay amount interval obj = do
+pushMonsters mbDelay amount interval obj = do
   globalTime' <- use globalTime
   logInfo "Pushing moving objects!"
-  let newEvents :: SchedEventHeap
-      newEvents = Heap.fromList $
-                    [0..(amount - 1)] &
-                    traverse *~ interval &
-                      traverse +~ globalTime' + fromMaybe 0 mbDelay &
-                      traverse %~ (\time' -> Heap.Entry time' (monsters %|>>= Just obj))
-  schedEvents <>= newEvents
+  let intervals = map (* interval) [0..(amount - 1)]
+      delay = fromMaybe 0 mbDelay
+  forM_ intervals $ \i -> addEvent (i + delay) (monsters %|>>= Just obj)
 
 --------------------------------------------------------------------------------
 
@@ -331,6 +328,8 @@ getCentaur = do
     , _currVec     = ((28, 0), (1, 0))
     , _speed       = 50
     , _vecIterator = tileFollower grass
+    , _totalHealth = 120
+    , _health      = 120
     }
 
 registerLevelEvents :: SW ()
@@ -340,7 +339,7 @@ registerLevelEvents = do
   level <- use level
   case level of
     1 -> do
-      pushMovObjs (Just 2000) 5 500 =<< getCentaur
+      pushMonsters (Just 500) 3 3000 =<< getCentaur
       -- registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 

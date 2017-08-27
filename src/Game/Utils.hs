@@ -25,7 +25,7 @@ moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
     movVec = (tX - x, tY - y) & both %~ sig
 
 distance :: (Int, Int) -> (Int, Int) -> Int
-distance (x1, y1) (x2, y2) = (x1 - x2) ^ 2 + (y1 - y2) ^ 2
+distance (x1, y1) (x2, y2) = floor $ sqrt $ fromIntegral $ (x1 - x2) ^ 2 + (y1 - y2) ^ 2
 
 (%|>>) :: ASetter s t (PM.Map v) (PM.Map v) -> Maybe v -> s -> t
 a %|>> b = a %~ (PM.|>> b)
