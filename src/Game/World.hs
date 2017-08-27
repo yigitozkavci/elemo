@@ -1,18 +1,20 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell            #-}
 
 module Game.World where
 
 --------------------------------------------------------------------------------
 import           Control.Lens
+import           Control.Monad.Logger     (LoggingT, MonadLogger,
+                                           runStdoutLoggingT)
+import           Control.Monad.State
 import           Control.Monad.State.Lazy
 import qualified Data.Heap                as Heap
 import qualified Data.Map                 as Map
 import           Data.Monoid              ((<>))
-import           Control.Monad.State
-import           Control.Monad.Logger             (MonadLogger, LoggingT, runStdoutLoggingT)
 import           Graphics.Gloss
+import           System.Random
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap        as PM
 import           Game.Assets
@@ -22,7 +24,7 @@ import           Game.Types
 --------------------------------------------------------------------------------
 
 newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
-  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger)
+  deriving (Functor, Applicative, Monad, MonadState World, MonadLogger, MonadIO)
 
 data SelectorState =
     MouseFree
@@ -44,6 +46,7 @@ data World = World
   , _guiState      :: GUIState
   , _assets        :: Assets
   , _builtTowers   :: TileMap
+  , _randGen       :: StdGen
   }
 
 makeLenses ''World

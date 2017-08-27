@@ -24,4 +24,5 @@ executable Main
                        containers,
                        lens,
                        heaps,
-                       zippers
+                       zippers,
+                       random

@@ -24,6 +24,7 @@ import           Data.Tuple                       (swap)
 import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Data.ViewPort     (ViewPort)
 import           Graphics.Gloss.Interface.IO.Game
+import           System.Random
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
@@ -178,11 +179,18 @@ addEvent time' ev = do
   globalTime' <- use globalTime
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') ev)
 
+getRandom :: SW Int
+getRandom = do
+  gen <- use randGen 
+  let (val, newGen) = next gen
+  randGen .= newGen
+  return val
+
 startShooting :: Position -> PM.PMRef MovingObject -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = MovingObject fireballPic 50 (scalePos pos, (1, 0)) (projectile target)
+  let fireballObj = MovingObject fireballPic 150 (scalePos pos, (1, 0)) (projectile target)
       event = do
         movingObjects %|>>= Just fireballObj
         addEvent 2000 event
@@ -339,7 +347,7 @@ registerLevelEvents = do
     1 -> do
       pushMovObjs (Just 2000) 5 500 =<< getCentaur
       -- pushMovObjs (Just 2000) 5 200 =<< getFireball
-      registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
+      -- registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
 registerNextLevel :: Int -> SW ()
@@ -353,8 +361,8 @@ nextLevel = do
   logInfo "whoa!"
   registerLevelEvents
 
-initWorld :: Assets -> World
-initWorld assets = World
+initWorld :: Assets -> StdGen -> World
+initWorld assets randGen = World
   { _level         = 0
   , _levelPic      = Blank
   , _movingObjects = PM.empty
@@ -366,6 +374,7 @@ initWorld assets = World
   , _guiState      = initGUIState assets
   , _assets        = assets
   , _builtTowers   = Map.empty
+  , _randGen       = randGen
   }
 
 gameFreq :: Int
@@ -374,7 +383,8 @@ gameFreq = 1000
 main :: IO ()
 main = do
   assets <- genAssets
-  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets) $ runSW nextLevel
+  randGen <- getStdGen
+  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets randGen) $ runSW nextLevel
   playIO
     (InWindow "Nice Window" (700, 700) (0, 0))
     white

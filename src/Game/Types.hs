@@ -24,7 +24,6 @@ type Speed = Int
 tileSize :: Int
 tileSize = 28
 
-
 type TileMap = Map.Map (Int, Int) UIObject
 
 type MovingVecIterator = (GlobalTime, TileMap, PM.Map MovingObject) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
