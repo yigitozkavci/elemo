@@ -40,7 +40,7 @@ initGUIState assets = GUIState
   , _guiTowerPosMap = Map.empty
   }
 
-type SchedEvent = Heap.Entry GlobalTime (SW ())
+type SchedEvent = Heap.Entry GlobalTime (T.Text, SW ())
 type SchedEventHeap = Heap.Heap SchedEvent
 
 data SelectorState =

@@ -17,6 +17,7 @@ import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
+import Data.Foldable (toList)
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, isJust, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
@@ -55,6 +56,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
              <> towerRanges
              <> Translate (-300) 300 (getPicture (world ^. playerInfo))
              <> paintAlerts
+             <> Translate (-200) (-100) eventDebugScreen
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -94,6 +96,15 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     paintAlerts' :: Q.Queue T.Text -> Picture
     paintAlerts' (Q.viewl -> Q.EmptyL) = mempty
     paintAlerts' (Q.viewl -> txt Q.:< queue) = smallText (show txt) <> Translate 0 30 (paintAlerts' queue)
+
+    eventDebugScreen :: Picture
+    eventDebugScreen =
+          Heap.toUnsortedList
+      >>> map (\(Heap.Entry k v) -> (k, v))
+      >>> map (second (T.unpack . fst))
+      >>> map (first show)
+      >>> smallTexts
+      $ _schedEvents world
 --------------------------------------------------------------------------------
 
 tilegenLevel' :: SW ()
@@ -143,7 +154,7 @@ update = do
     consumeSchedEvents = do
       globalTime' <- use globalTime
       ev <- Heap.viewMin <$> use schedEvents
-      forM_ ev $ \(Heap.Entry time f, newHeap) ->
+      forM_ ev $ \(Heap.Entry time (_, f), newHeap) ->
         when (time == globalTime') $ do
           schedEvents .= newHeap
           f -- Actual event mutation
@@ -174,10 +185,10 @@ update = do
                 True -> return (pos, tower) -- Target is alive and is in range
                 False -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is alive but gone out of range
 
-addEvent :: Int -> SW () -> SW ()
-addEvent time' ev = do
+addEvent :: Int -> T.Text -> SW () -> SW ()
+addEvent time' description ev = do
   globalTime' <- use globalTime
-  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') ev)
+  schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') (description, ev))
 
 findClosestMonster :: Position -> Int -> SW (Maybe (PM.PMRef Monster))
 findClosestMonster pos range = do
@@ -217,9 +228,9 @@ startShooting pos range target = do
       event = inRange pos range target >>= \case
         True -> do
           projectiles %|>>= Just fireballObj
-          addEvent 1000 event
+          addEvent 1000 "Start shooting" event
         False -> return () -- If target doesn't exist, don't schedule more shooting events
-  addEvent 500 event
+  addEvent 500 "Start shooting" event
 
 updateIO :: Float -> World -> IO World
 updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update
@@ -369,7 +380,7 @@ dequeue (Q.viewl -> _ Q.:< rem) = rem
 addAlert :: T.Text -> SW ()
 addAlert txt = do
   alerts %= (`enqueue` txt)
-  addEvent 2000 $ alerts %= dequeue
+  addEvent 2000 "Remove alert" $ alerts %= dequeue
 
 pushMonsters
   :: Maybe Int
@@ -385,7 +396,7 @@ pushMonsters mbDelay amount interval obj = do
   globalTime' <- use globalTime
   let intervals = map (* interval) [0..(amount - 1)]
       delay = fromMaybe 0 mbDelay
-  forM_ intervals $ \i -> addEvent (i + delay) (monsters %|>>= Just obj)
+  forM_ intervals $ \i -> addEvent (i + delay) "Push monster" (monsters %|>>= Just obj)
 
 --------------------------------------------------------------------------------
 
@@ -423,7 +434,7 @@ registerLevelEvents = do
 nextLevelIn :: Int -> SW ()
 nextLevelIn sec = do
   addAlert "Next level!"
-  addEvent sec $ do
+  addEvent sec "Next level" $ do
     level += 1
     registerLevelEvents
 
