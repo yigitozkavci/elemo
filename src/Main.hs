@@ -1,30 +1,26 @@
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
-import           Control.Arrow                    (first, second, (&&&), (***), (>>>))
+import           Control.Arrow                    (first, second, (&&&), (***),
+                                                   (>>>))
 import           Control.Lens
 import           Control.Lens.Operators
-import           Control.Applicative
-import           Control.Monad.Logger.CallStack   (logInfo)
-import           Control.Monad.State (execStateT, gets, modify)
-import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad
-import           Control.Zipper                   (farthest)
-import           Data.Fixed                       (mod')
-import           Data.Foldable                    (toList)
+import           Control.Monad.Logger             (runStdoutLoggingT)
+import           Control.Monad.Logger.CallStack   (logInfo)
+import           Control.Monad.State              (execStateT, gets, modify)
 import qualified Data.Heap                        as Heap
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, mapMaybe)
-import           Data.Monoid
+import           Data.Monoid                      (mempty, (<>))
 import           Data.Tuple                       (swap)
 import           Graphics.Gloss                   hiding (blank, display)
-import           Graphics.Gloss.Data.ViewPort     (ViewPort)
 import           Graphics.Gloss.Interface.IO.Game
-import           System.Random
+import           System.Random                    (StdGen, getStdGen, next)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
@@ -55,7 +51,7 @@ translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
 
 displayIO :: World -> IO Picture
 displayIO = return . display
-    
+
 display :: World -> Picture
 display world = paintGUI (_assets world) (_guiState world)
              <> _levelPic world
@@ -181,7 +177,7 @@ addEvent time' ev = do
 
 getRandom :: SW Int
 getRandom = do
-  gen <- use randGen 
+  gen <- use randGen
   let (val, newGen) = next gen
   randGen .= newGen
   return val
