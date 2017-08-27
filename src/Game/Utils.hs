@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Game.Utils where
 
 --------------------------------------------------------------------------------
@@ -19,10 +21,20 @@ sig x
   | x < 0 = -1
   | otherwise = 0
 
-moveTowards :: (Int, Int) -> (Int, Int) -> (Int, Int)
-moveTowards (x, y) (tX, tY) = tupleSum (x, y) movVec
+-- | Here is the algorithm:
+--
+-- From (3, 2) to (10, 15) we don't just want this particule to move with (1, 1) vector. Instead, we want to move with probabilities (7/20, 13/20). This way we'll achieve a natural movement flow.
+moveTowards :: Int -> (Int, Int) -> (Int, Int) -> (Int, Int)
+moveTowards rand (x, y) (tX, tY) = tupleSum (x, y) movVec
   where
-    movVec = (tX - x, tY - y) & both %~ sig
+    xD = tX - x
+    yD = tY - y
+    sum :: Float = fromIntegral $ abs xD + abs yD
+    xP = fromIntegral xD / sum
+    yP = fromIntegral yD / sum
+    decide :: Float -> Int
+    decide t = if abs t * 100 > fromIntegral (rand `mod` 100) then sig t else 0
+    movVec = (decide xP, decide yP)
 
 distance :: (Int, Int) -> (Int, Int) -> Int
 distance (x1, y1) (x2, y2) = floor $ sqrt $ fromIntegral $ (x1 - x2) ^ 2 + (y1 - y2) ^ 2

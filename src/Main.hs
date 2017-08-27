@@ -205,7 +205,8 @@ speedSync :: Int -> Int -> Bool
 speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
 projectile :: PM.PMRef Monster -> ProjectileIterator
-projectile moRef (time, monsters) speed damage pos@(x, y) =
+projectile moRef (time, monsters) speed damage pos@(x, y) = do
+  rand <- getRandom
   if speedSync time speed then
     case PM.lookup moRef monsters of
       Nothing -> return Nothing -- When target is lost, this projectile should also disappear
@@ -214,8 +215,9 @@ projectile moRef (time, monsters) speed damage pos@(x, y) =
         if distance pos targetPos < 5
           then
             Nothing <$ inflictDamage moRef damage
-          else
-            return $ Just (moveTowards pos targetPos)
+          else do
+            logInfo $ T.pack $ show pos <> show targetPos
+            return $ Just (moveTowards rand pos targetPos)
   else
     return $ Just pos
 
