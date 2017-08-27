@@ -26,7 +26,9 @@ tileSize = 28
 
 type TileMap = Map.Map (Int, Int) UIObject
 
-type MovingVecIterator = (GlobalTime, TileMap, PM.Map MovingObject) -> Picture -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
+type MonsterIterator = (GlobalTime, TileMap) -> Speed -> (Position, Direction) -> Maybe (Position, Direction)
+
+type ProjectileIterator = (GlobalTime, PM.Map Monster) -> Speed -> Position -> Maybe Position
 
 data UIObject =
     Floor Bool Picture -- (Floor isPlacable picture)
@@ -34,7 +36,7 @@ data UIObject =
   deriving (Show)
 
 data TowerLockState =
-    TowerLocked (PM.PMRef MovingObject)
+    TowerLocked (PM.PMRef Monster)
   | TowerNonLocked
   deriving (Show)
 
@@ -44,14 +46,22 @@ data Tower = Tower
   , _lockState :: TowerLockState
   } deriving (Show)
 
-data MovingObject = MovingObject
+data Monster = Monster
   { _moPicture   :: Picture
   , _speed       :: Speed
   , _currVec     :: (Position, Direction)
-  , _vecIterator :: MovingVecIterator
+  , _vecIterator :: MonsterIterator
   }
 
-instance Show MovingObject where
-  show (MovingObject _pic speed currVec _it) = "MovingObject { speed = " <> show speed <> ", currVec = " <> show currVec <> " }"
+data Projectile = Projectile
+  { _projectilePicture :: Picture
+  , _projectileSpeed :: Speed
+  , _projectilePosition :: Position
+  , _projectileIterator :: ProjectileIterator
+  }
 
-makeLenses ''MovingObject
+instance Show Monster where
+  show (Monster _pic speed currVec _it) = "Monster { speed = " <> show speed <> ", currVec = " <> show currVec <> " }"
+
+makeLenses ''Monster
+makeLenses ''Projectile

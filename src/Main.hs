@@ -55,7 +55,8 @@ displayIO = return . display
 display :: World -> Picture
 display world = paintGUI (_assets world) (_guiState world)
              <> _levelPic world
-             <> movingObjs
+             <> monsters
+             <> projectiles
              <> mouseCursor
              <> builtTowers'
              <> towerLockings
@@ -74,11 +75,11 @@ display world = paintGUI (_assets world) (_guiState world)
         >>> (* tileSize)
         >>> fromIntegral
 
-    movingObjs :: Picture
-    movingObjs = mconcat . map (translateImg . imgAndPos) . PM.elems $ _movingObjects world
+    monsters :: Picture
+    monsters = mconcat . map (translateImg . (fst . _currVec &&& _moPicture)) . PM.elems $ _monsters world
 
-    imgAndPos :: MovingObject -> (Position, Picture)
-    imgAndPos mo = (fst (_currVec mo), _moPicture mo)
+    projectiles :: Picture
+    projectiles = mconcat . map (translateImg . (_projectilePosition &&& _projectilePicture)) . PM.elems $ _projectiles world
 
     builtTowers' :: Picture
     builtTowers' = tilemapToPicture (_builtTowers world)
@@ -88,7 +89,7 @@ display world = paintGUI (_assets world) (_guiState world)
 
     towerLocking :: (Position, UIObject) -> Picture
     towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
-      case PM.lookup moRef (_movingObjects world) of
+      case PM.lookup moRef (_monsters world) of
         Just mo ->
           Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
         Nothing -> mempty -- This is temporary second until tower finds a new target.
@@ -116,21 +117,30 @@ update = do
   tilegenLevel'
   tilegenGUI'
   use builtTowers >>= (wTileMap <>=)
-  movingObjects <~ (PM.mapM runMO =<< use movingObjects)
+  monsters <~ (PM.mapM moveMonster =<< use monsters)
+  projectiles <~ (PM.mapM moveProjectile =<< use projectiles)
   towerShootings
   globalTime += 1
   consumeSchedEvents
 
   where
-    runMO :: Maybe MovingObject -> SW (Maybe MovingObject)
-    runMO (Just (MovingObject pic speed vec f)) = do
+    moveMonster :: Maybe Monster -> SW (Maybe Monster)
+    moveMonster Nothing = return Nothing
+    moveMonster (Just (Monster pic speed vec f)) = do
       time <- use globalTime
       tileMap <- use wTileMap
-      mos <- use movingObjects
-      case f (time, tileMap, mos) pic speed vec of
+      case f (time, tileMap) speed vec of
         Nothing     -> return Nothing
-        Just newVec -> return $ Just $ MovingObject pic speed newVec f
-    runMO Nothing = return Nothing
+        Just newVec -> return $ Just $ Monster pic speed newVec f
+
+    moveProjectile :: Maybe Projectile -> SW (Maybe Projectile)
+    moveProjectile Nothing = return Nothing
+    moveProjectile (Just (Projectile pic speed pos f)) = do
+      time <- use globalTime
+      mos <- use monsters
+      case f (time, mos) speed pos of
+        Nothing -> return Nothing
+        Just newPos -> return $ Just $ Projectile pic speed newPos f
 
     consumeSchedEvents :: SW ()
     consumeSchedEvents = do
@@ -150,17 +160,17 @@ update = do
 
     towerShooting :: (Position, UIObject) -> SW (Position, UIObject)
     towerShooting (pos, tower@(UITower (Tower dmg pic lockState))) = do
-      movingObjects' <- gets _movingObjects
+      monsters' <- use monsters
       case lockState of
         TowerNonLocked ->
-          case PM.assocs movingObjects' of
+          case PM.assocs monsters' of
             []               -> return (pos, tower) -- Tower non locked and there is no target
             ((moRef, _mo):_) -> do                  -- Lock the tower
               -- Register shoot event here
               startShooting pos moRef
               return (pos, UITower (Tower dmg pic (TowerLocked moRef)))
         TowerLocked moRef ->
-          case PM.lookup moRef movingObjects' of
+          case PM.lookup moRef monsters' of
             Nothing -> return (pos, UITower (Tower dmg pic TowerNonLocked)) -- Target is lost
             Just _  -> return (pos, tower) -- Tower has a target and target is still alive
 
@@ -182,13 +192,13 @@ getRandom = do
   randGen .= newGen
   return val
 
-startShooting :: Position -> PM.PMRef MovingObject -> SW ()
+startShooting :: Position -> PM.PMRef Monster -> SW ()
 startShooting pos target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = MovingObject fireballPic 150 (scalePos pos, (1, 0)) (projectile target)
+  let fireballObj = Projectile fireballPic 150 (scalePos pos) (projectile target)
       event = do
-        movingObjects %|>>= Just fireballObj
+        projectiles %|>>= Just fireballObj
         addEvent 2000 event
   addEvent 500 event
 
@@ -201,10 +211,10 @@ speedSync :: Int -> Int -> Bool
 speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
 -- TODO: Projectile-type moving objects don't need `dir` parameter. Maybe remove it?
-projectile :: PM.PMRef MovingObject -> MovingVecIterator
-projectile moRef (time, _, mos) pic speed (pos@(x, y), dir) =
+projectile :: PM.PMRef Monster -> ProjectileIterator
+projectile moRef (time, monsters) speed pos@(x, y) =
   if speedSync time speed then
-    case PM.lookup moRef mos of
+    case PM.lookup moRef monsters of
       Nothing -> Nothing -- When target is lost, this projectile should also disappear
       Just target ->
         let (targetPos@(targetX, targetY), _dir) = _currVec target in
@@ -212,12 +222,12 @@ projectile moRef (time, _, mos) pic speed (pos@(x, y), dir) =
           then
             Nothing -- Decrease health of the target by tower damage here.
           else
-            Just (moveTowards pos targetPos, dir)
+            Just (moveTowards pos targetPos)
   else
-    Just (pos, dir)
+    Just pos
 
-tileFollower :: Picture -> MovingVecIterator
-tileFollower tile (time, tileMap, _) _pic speed ((x, y), dir) =
+tileFollower :: Picture -> MonsterIterator
+tileFollower tile (time, tileMap) speed ((x, y), dir) =
   if speedSync time speed then
     if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
       case availablePositions of
@@ -296,7 +306,7 @@ pushMovObjs
     -- ^ Amount of objs
   -> Int
     -- ^ Interval
-  -> MovingObject
+  -> Monster
     -- ^ Type of objs
   -> SW ()
 pushMovObjs mbDelay amount interval obj = do
@@ -307,27 +317,16 @@ pushMovObjs mbDelay amount interval obj = do
                     [0..(amount - 1)] &
                     traverse *~ interval &
                       traverse +~ globalTime' + fromMaybe 0 mbDelay &
-                      traverse %~ (\time' -> Heap.Entry time' (movingObjects %|>>= Just obj))
+                      traverse %~ (\time' -> Heap.Entry time' (monsters %|>>= Just obj))
   schedEvents <>= newEvents
 
 --------------------------------------------------------------------------------
 
-getFireball :: SW MovingObject
-getFireball = do
-  pic <- use $ assets . moAssets . fireball
-  grass <- use $ assets . grass
-  return MovingObject
-    { _moPicture   = pic
-    , _currVec     = ((28, 0), (1, 0))
-    , _speed       = 50
-    , _vecIterator = tileFollower grass
-    }
-
-getCentaur :: SW MovingObject
+getCentaur :: SW Monster
 getCentaur = do
   pic <- use $ assets . moAssets . centaur
   grass <- use $ assets . grass
-  return MovingObject
+  return Monster
     { _moPicture   = pic
     , _currVec     = ((28, 0), (1, 0))
     , _speed       = 50
@@ -342,7 +341,6 @@ registerLevelEvents = do
   case level of
     1 -> do
       pushMovObjs (Just 2000) 5 500 =<< getCentaur
-      -- pushMovObjs (Just 2000) 5 200 =<< getFireball
       -- registerNextLevel 15000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
@@ -361,7 +359,7 @@ initWorld :: Assets -> StdGen -> World
 initWorld assets randGen = World
   { _level         = 0
   , _levelPic      = Blank
-  , _movingObjects = PM.empty
+  , _monsters      = PM.empty
   , _wTileMap      = Map.empty
   , _globalTime    = 0
   , _schedEvents   = Heap.empty
@@ -371,6 +369,7 @@ initWorld assets randGen = World
   , _assets        = assets
   , _builtTowers   = Map.empty
   , _randGen       = randGen
+  , _projectiles   = PM.empty
   }
 
 gameFreq :: Int

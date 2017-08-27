@@ -36,7 +36,7 @@ type SchedEventHeap = Heap.Heap SchedEvent
 data World = World
   { _level         :: Int
   , _levelPic      :: Picture
-  , _movingObjects :: PM.Map MovingObject
+  , _monsters      :: PM.Map Monster
   , _wTileMap      :: TileMap
   , _globalTime    :: GlobalTime -- | In milisecs
   , _schedEvents   :: SchedEventHeap -- | Events can mutate the whole world, but
@@ -47,6 +47,7 @@ data World = World
   , _assets        :: Assets
   , _builtTowers   :: TileMap
   , _randGen       :: StdGen
+  , _projectiles   :: PM.Map Projectile
   }
 
 makeLenses ''World
