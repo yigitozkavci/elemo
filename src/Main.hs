@@ -51,6 +51,7 @@ display world = paintGUI (_assets world) (_guiState world)
              <> mouseCursor
              <> getPicture (_builtTowers world)
              <> towerLockings
+             <> towerRanges
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -70,12 +71,19 @@ display world = paintGUI (_assets world) (_guiState world)
     towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
 
     towerLocking :: (Position, UIObject) -> Picture
-    towerLocking (pos, UITower (Tower _ pic (TowerLocked moRef))) =
+    towerLocking (pos, UITower (Tower _ pic range (TowerLocked moRef))) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
-          Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
+          Color red $ Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
         Nothing -> mempty -- This is temporary second until tower finds a new target.
     towerLocking _ = mempty
+
+    towerRanges :: Picture
+    towerRanges = _builtTowers >>> Map.assocs >>> map towerRange >>> mconcat $ world
+
+    towerRange :: (Position, UIObject) -> Picture
+    towerRange (pos, UITower (Tower _ _ range _)) =
+      translateImg (scalePos pos, Color yellow $ Circle (fromIntegral range))
 
 --------------------------------------------------------------------------------
 
@@ -141,35 +149,40 @@ update = do
       builtTowers .= newTowers
 
     towerShooting :: (Position, UIObject) -> SW (Position, UIObject)
-    towerShooting (pos, tower@(UITower (Tower dmg pic lockState))) = do
+    towerShooting (pos, tower@(UITower (Tower dmg pic range lockState))) = do
       monsters' <- use monsters
       case lockState of
         TowerNonLocked ->
-          findClosestMonster pos >>= \case
+          findClosestMonster (scalePos pos) range >>= \case
             Nothing    -> return (pos, tower) -- Tower non locked and couldn't find a target
-            Just moRef -> do                  -- Lock the tower
+            Just moRef -> do
               -- Register shoot event here
-              startShooting pos moRef
-              return (pos, UITower (Tower dmg pic (TowerLocked moRef)))
+              startShooting (scalePos pos) range moRef
+              return (pos, UITower (Tower dmg pic range (TowerLocked moRef)))
         TowerLocked moRef ->
           case PM.lookup moRef monsters' of
-            Nothing -> return (pos, UITower (Tower dmg pic TowerNonLocked)) -- Target is lost
-            Just _  -> return (pos, tower) -- Tower has a target and target is still alive
+            Nothing -> return (pos, UITower (Tower dmg pic range TowerNonLocked)) -- Target is lost
+            Just monster ->
+              inRange (scalePos pos) range moRef >>= \case
+                True -> return (pos, tower) -- Target is alive and is in range
+                False -> return (pos, UITower (Tower dmg pic range TowerNonLocked)) -- Target is alive but gone out of range
 
 addEvent :: Int -> SW () -> SW ()
 addEvent time' ev = do
   globalTime' <- use globalTime
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') ev)
 
-findClosestMonster :: Position -> SW (Maybe (PM.PMRef Monster))
-findClosestMonster pos = do
+findClosestMonster :: Position -> Int -> SW (Maybe (PM.PMRef Monster))
+findClosestMonster pos range = do
   monsters' <- use monsters
+  logInfo "Finding the closest"
   return $ monsters' & findClosest
     where
       findClosest :: PM.Map Monster -> Maybe (PM.PMRef Monster)
       findClosest = PM.assocsJust
         >>> map (second (fst . _currVec)) -- [(ref, pos)]
         >>> sortBy (\(_, p1) (_, p2) -> compare (distance pos p1) (distance pos p2)) -- Sorted [(ref, pos)]
+        >>> filter (\(_, pos') -> distance pos pos' < range)
         >>> headMay -- Maybe (ref, pos)
         >=> Just . fst -- Maybe ref
 
@@ -184,12 +197,18 @@ targetExists :: PM.PMRef Monster -> SW Bool
 targetExists moRef =
   isJust . PM.lookup moRef <$> use monsters
 
-startShooting :: Position -> PM.PMRef Monster -> SW ()
-startShooting pos target = do
+inRange :: Position -> Int -> PM.PMRef Monster -> SW Bool
+inRange pos range moRef =
+  PM.lookup moRef <$> use monsters >>= \case
+    Nothing -> return False
+    Just monster -> return $ distance pos (fst (_currVec monster)) < range
+
+startShooting :: Position -> Int -> PM.PMRef Monster -> SW ()
+startShooting pos range target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = Projectile fireballPic 150 12 (scalePos pos) (projectile target)
-      event = targetExists target >>= \case
+  let fireballObj = Projectile fireballPic 150 12 pos (projectile target)
+      event = inRange pos range target >>= \case
         True -> do
           projectiles %|>>= Just fireballObj
           addEvent 1000 event
@@ -216,7 +235,6 @@ projectile moRef (time, monsters) speed damage pos@(x, y) = do
           then
             Nothing <$ inflictDamage moRef damage
           else do
-            logInfo $ T.pack $ show pos <> show targetPos
             return $ Just (moveTowards rand pos targetPos)
   else
     return $ Just pos
@@ -359,7 +377,6 @@ registerNextLevel sec = do
 nextLevel :: SW ()
 nextLevel = do
   level += 1
-  logInfo "whoa!"
   registerLevelEvents
 
 initWorld :: Assets -> StdGen -> World
