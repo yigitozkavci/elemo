@@ -71,7 +71,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
 
     towerLocking :: (Position, UIObject) -> Picture
-    towerLocking (pos, UITower (Tower _ pic range (TowerLocked moRef))) =
+    towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef))) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
           Color red $ Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
@@ -82,7 +82,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerRanges = _builtTowers >>> Map.assocs >>> map towerRange >>> mconcat $ world
 
     towerRange :: (Position, UIObject) -> Picture
-    towerRange (pos, UITower (Tower _ _ range _)) =
+    towerRange (pos, UITower (Tower _ _ range _ _)) =
       translateImg (scalePos pos, Color yellow $ Circle (fromIntegral range))
 
 --------------------------------------------------------------------------------
@@ -147,7 +147,7 @@ update = do
       builtTowers .= newTowers
 
     towerShooting :: (Position, UIObject) -> SW (Position, UIObject)
-    towerShooting (pos, tower@(UITower (Tower dmg pic range lockState))) = do
+    towerShooting (pos, tower@(UITower (Tower dmg pic range cost lockState))) = do
       monsters' <- use monsters
       case lockState of
         TowerNonLocked ->
@@ -156,14 +156,14 @@ update = do
             Just moRef -> do
               -- Register shoot event here
               startShooting (scalePos pos) range moRef
-              return (pos, UITower (Tower dmg pic range (TowerLocked moRef)))
+              return (pos, UITower (Tower dmg pic range cost (TowerLocked moRef)))
         TowerLocked moRef ->
           case PM.lookup moRef monsters' of
-            Nothing -> return (pos, UITower (Tower dmg pic range TowerNonLocked)) -- Target is lost
+            Nothing -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is lost
             Just monster ->
               inRange (scalePos pos) range moRef >>= \case
                 True -> return (pos, tower) -- Target is alive and is in range
-                False -> return (pos, UITower (Tower dmg pic range TowerNonLocked)) -- Target is alive but gone out of range
+                False -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is alive but gone out of range
 
 addEvent :: Int -> SW () -> SW ()
 addEvent time' ev = do
@@ -309,6 +309,14 @@ tileFollower tile speed ((x, y), dir) = do
 guiClick :: (Float, Float) -> SW (Maybe UIObject)
 guiClick pos = Map.lookup (adjustPosToIndex pos) <$> use wTileMap
 
+buyTower :: Tower -> SW Bool
+buyTower tower = do
+  gold' <- use $ playerInfo . gold
+  let cost = tower ^. towerCost
+  if gold' >= cost
+    then True <$ (playerInfo . gold -= cost)
+    else return False
+
 eventHandler :: Event -> SW ()
 eventHandler = \case
   EventMotion pos ->
@@ -321,9 +329,12 @@ eventHandler = \case
           _ -> return ()
       SelectedItem tower ->
         guiClick pos >>= \case
-          Just (Floor True _) -> do
-              builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
-              selectorState .= MouseFree
+          Just (Floor True _) ->
+            buyTower tower >>= \case
+              True -> do
+                builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
+                selectorState .= MouseFree
+              False -> logInfo "Not enough gold!"
           _ -> return ()
   EventKey (MouseButton RightButton) Down _modifiers _pos ->
     selectorState .= MouseFree

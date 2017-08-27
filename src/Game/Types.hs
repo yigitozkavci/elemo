@@ -32,8 +32,8 @@ data GUIState = GUIState
 initGUIState :: Assets -> GUIState
 initGUIState assets = GUIState
   { _guiTowers = Seq.fromList
-    [ Tower 10 (_whiteTower assets) 50 TowerNonLocked
-    , Tower 20 (_greenTower assets) 100 TowerNonLocked
+    [ Tower 10 (_whiteTower assets) 50 20 TowerNonLocked
+    , Tower 20 (_greenTower assets) 100 40 TowerNonLocked
     ]
   , _guiTowerPosMap = Map.empty
   }
@@ -96,7 +96,7 @@ data UIObject =
 
 instance HasPicture UIObject where
   getPicture (Floor _ pic) = pic
-  getPicture (UITower (Tower _ pic _ _)) = pic
+  getPicture (UITower Tower { _image = pic }) = pic
 
 data TowerLockState =
     TowerLocked (PM.PMRef Monster)
@@ -107,6 +107,7 @@ data Tower = Tower
   { _damage    :: Int
   , _image     :: Picture
   , _range     :: Int
+  , _towerCost :: Int
   , _lockState :: TowerLockState
   } deriving (Show)
 
@@ -191,6 +192,7 @@ instance HasPicture PlayerInfo where
                , ("Gold", show gold)
                ]
 
+makeLenses ''Tower
 makeLenses ''Monster
 makeLenses ''Projectile
 
