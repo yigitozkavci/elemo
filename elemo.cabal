@@ -17,14 +17,16 @@ executable Main
   default-language:    Haskell2010
   main-is:             Main.hs
   hs-source-dirs:      src
-  build-depends:       base,
-                       gloss,
-                       mtl,
-                       monad-logger,
-                       containers,
-                       lens,
-                       heaps,
-                       zippers,
-                       random,
-                       safe,
-                       text
+  build-depends:
+    base,
+    containers,
+    gloss,
+    heaps,
+    lens,
+    monad-logger,
+    mtl,
+    random,
+    safe,
+    sequence,
+    text,
+    zippers

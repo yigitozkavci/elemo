@@ -1,24 +1,26 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
+import           Control.Applicative.Extra
 import           Control.Arrow                    (first, second, (&&&), (***),
                                                    (>>>))
 import           Control.Lens
 import           Control.Lens.Operators
 import           Control.Monad
-import Control.Applicative.Extra
 import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
 import qualified Data.Map                         as Map
-import           Data.Maybe                       (fromMaybe, mapMaybe, isJust)
+import           Data.Maybe                       (fromMaybe, isJust, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
+import qualified Data.Sequence.Queue              as Q
 import qualified Data.Text                        as T
 import           Data.Tuple                       (swap)
 import           Graphics.Gloss                   hiding (blank, display)
@@ -52,6 +54,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
              <> towerLockings
              <> towerRanges
              <> Translate (-300) 300 (getPicture (world ^. playerInfo))
+             <> paintAlerts
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -85,6 +88,12 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerRange (pos, UITower (Tower _ _ range _ _)) =
       translateImg (scalePos pos, Color yellow $ Circle (fromIntegral range))
 
+    paintAlerts :: Picture
+    paintAlerts = Translate 200 (-300) $ paintAlerts' (_alerts world)
+
+    paintAlerts' :: Q.Queue T.Text -> Picture
+    paintAlerts' (Q.viewl -> Q.EmptyL) = mempty
+    paintAlerts' (Q.viewl -> txt Q.:< queue) = smallText (show txt) <> Translate 0 30 (paintAlerts' queue)
 --------------------------------------------------------------------------------
 
 tilegenLevel' :: SW ()
@@ -247,7 +256,7 @@ inflictDamage moRef damage = do
         | monster ^. health < damage = return Nothing -- Monster dies
         | otherwise = do
           let newMonster = monster & health -~ damage
-          logInfo $ "Inflicted " <> T.pack (show damage) <> " damage to monster: " <> T.pack (show newMonster)
+          -- logInfo $ "Inflicted " <> T.pack (show damage) <> " damage to monster: " <> T.pack (show newMonster)
           return $ Just newMonster
 
 gameOver :: SW ()
@@ -334,15 +343,33 @@ eventHandler = \case
               True -> do
                 builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
                 selectorState .= MouseFree
-              False -> logInfo "Not enough gold!"
+              False -> do
+                alerts' <- use alerts
+                addAlert "Not enough gold!" >> logInfo (T.pack (show alerts')) 
           _ -> return ()
   EventKey (MouseButton RightButton) Down _modifiers _pos ->
     selectorState .= MouseFree
   _ -> return ()
 
+instance Show a => Show (Q.Queue a) where
+  show (Q.viewl -> Q.EmptyL) = "_"
+  show (Q.viewl -> val Q.:< rem) = show val <> " -> " <> show rem
+
 eventHandlerIO :: Event -> World -> IO World
 eventHandlerIO ev world =
   runStdoutLoggingT $ execStateT (runSW (eventHandler ev)) world
+
+enqueue :: Q.Queue a -> a -> Q.Queue a
+enqueue = (Q.|>)
+
+dequeue :: Q.Queue a -> Q.Queue a
+dequeue (Q.viewl -> _ Q.:< rem) = rem
+
+addAlert :: T.Text -> SW ()
+addAlert txt = do
+  logInfo "Adding alert"
+  alerts %= (`enqueue` txt)
+  addEvent 2000 $ alerts %= dequeue
 
 pushMonsters
   :: Maybe Int
@@ -413,6 +440,7 @@ initWorld assets randGen = World
   , _randGen       = randGen
   , _projectiles   = PM.empty
   , _playerInfo    = PlayerInfo 10 100
+  , _alerts        = Q.empty
   }
 
 gameFreq :: Int

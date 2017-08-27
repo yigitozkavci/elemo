@@ -22,6 +22,8 @@ import qualified Data.PreservedMap as PM
 import qualified Data.Heap as Heap
 import Game.Assets
 import qualified Data.Sequence as Seq
+import qualified Data.Text as T
+import qualified Data.Sequence.Queue as Seq
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
@@ -61,6 +63,7 @@ data World = World
   , _randGen       :: StdGen
   , _projectiles   :: PM.Map Projectile
   , _playerInfo    :: PlayerInfo
+  , _alerts        :: Seq.Queue T.Text
   }
 
 newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
