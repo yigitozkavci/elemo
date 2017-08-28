@@ -36,11 +36,13 @@ import           Game.Types
 import           Game.Utils
 --------------------------------------------------------------------------------
 
-adjustPosToIndex :: (Float, Float) -> (Int, Int)
-adjustPosToIndex = over both $
-      (+ (fromIntegral tileSize / 2))
-  >>> (/ fromIntegral tileSize)
-  >>> floor
+adjustPosToIndex :: (Float, Float) -> TilePosition
+adjustPosToIndex = TilePosition .
+  over both (
+        (+ (fromIntegral tileSize / 2))
+    >>> (/ fromIntegral tileSize)
+    >>> floor
+  )
 
 displayIO :: World -> IO Picture
 displayIO = return . display
@@ -75,7 +77,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerLockings :: Picture
     towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
 
-    towerLocking :: (Position, UIObject) -> Picture
+    towerLocking :: (TilePosition, UIObject) -> Picture
     towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef))) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
@@ -86,7 +88,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerRanges :: Picture
     towerRanges = _builtTowers >>> Map.assocs >>> map towerRange >>> mconcat $ world
 
-    towerRange :: (Position, UIObject) -> Picture
+    towerRange :: (TilePosition, UIObject) -> Picture
     towerRange (pos, UITower (Tower _ _ range _ _)) =
       translateImg (scalePos pos, Color yellow $ Circle (fromIntegral range))
 
@@ -132,6 +134,7 @@ update = do
   towerShootings
   globalTime += 1
   consumeSchedEvents
+  use monsters >>= \m' -> logInfo $ T.pack (show m')
 
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
@@ -166,7 +169,7 @@ update = do
       newTowers <- Map.fromList <$> forM builtTowers' towerShooting
       builtTowers .= newTowers
 
-    towerShooting :: (Position, UIObject) -> SW (Position, UIObject)
+    towerShooting :: (TilePosition, UIObject) -> SW (TilePosition, UIObject)
     towerShooting (pos, tower@(UITower (Tower dmg pic range cost lockState))) = do
       monsters' <- use monsters
       case lockState of
@@ -278,6 +281,9 @@ reduceLife = do
   lives' <- playerInfo . lives <-= 1
   when (lives' <= 0) gameOver
 
+tileSum :: TilePosition -> TilePosition -> TilePosition
+tileSum (TilePosition x) (TilePosition y) = TilePosition (tupleSum x y)
+
 tileFollower :: Picture -> MonsterIterator
 tileFollower tile speed ((x, y), dir) = do
   tileMap' <- use wTileMap
@@ -294,15 +300,17 @@ tileFollower tile speed ((x, y), dir) = do
   where
     availablePositions tileMap' =
         -- Accept only positions that are matching to the given tile type from points of interest
-        filter (\(pos', _) ->
-          case Map.lookup (unscalePos pos') tileMap' of
+        filter (\(pos, dir) ->
+          case Map.lookup (unscalePos pos) tileMap' of
             Just obj
               | getPicture obj == tile -> True
             _ -> False
         )
         -- After filtering, direction addings must be cut. We don't want `tileSize` amount
         -- of movement, afterall.
-        >>> map (\(pos, dir) -> (tupleSum pos (mapTuple (* (-tileSize + 1)) dir), dir))
+        >>> map (\(pos, TilePosition dir) ->
+          (tupleSum pos (dir & both *~ (1 - tileSize)), dir)
+          )
         $ posOfIntr
 
     -- Positions of interest. For position (28, 56) and direction (1, 0),
@@ -316,9 +324,9 @@ tileFollower tile speed ((x, y), dir) = do
     -- o.oo
     --
     -- For arrow computation,  left computes positions, right computes directions
-    posOfIntr :: [(Position, Direction)]
+    posOfIntr :: [(Position, TilePosition)]
     posOfIntr =
-      map (scalePos >>> ((+x) *** (+y)) &&& unscalePos)
+      map ((TilePosition >>> scalePos >>> (`tupleSum` (x, y))) &&& TilePosition)
         [ dir
         , swap dir
         , dir & (swap >>> both *~ -1)

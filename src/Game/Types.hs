@@ -86,7 +86,10 @@ tileSize = 28
 class HasPicture m where
   getPicture :: m -> Picture
 
-type TileMap = Map.Map (Int, Int) UIObject
+newtype TilePosition = TilePosition (Int, Int)
+  deriving (Show, Eq, Ord)
+
+type TileMap = Map.Map TilePosition UIObject
 
 type MonsterIterator = Speed -> (Position, Direction) -> SW (Maybe (Position, Direction))
 
@@ -168,11 +171,11 @@ instance HasPicture TileMap where
            >>> map (second getPicture >>> first scalePos >>> translateImg)
            >>> mconcat
 
-scalePos :: Position -> Position
-scalePos = both *~ tileSize
+scalePos :: TilePosition -> (Int, Int)
+scalePos (TilePosition pos) = pos & both *~ tileSize
 
-unscalePos :: Position -> Position
-unscalePos = both %~ (`div` tileSize)
+unscalePos :: (Int, Int) -> TilePosition
+unscalePos pos = TilePosition $ pos & both %~ (`div` tileSize)
 
 data PlayerInfo = PlayerInfo
   { _lives :: Int

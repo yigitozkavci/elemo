@@ -77,7 +77,7 @@ singleTile :: UIObject -> (Int, Int) -> TilegenM ()
 singleTile obj pos = do
   let (x, y) = pos & (both %~ fromIntegral) . (both *~ tileSize)
   picture <>= Translate x y (getPicture obj)
-  tileMap %= Map.insert pos obj -- We insert non-scaled position
+  tileMap %= Map.insert (TilePosition pos) obj -- We insert non-scaled position
 
 rectTiles :: UIObject -> (Int, Int) -> Int -> Int -> TilegenM ()
 rectTiles obj (startX, startY) width height = do
