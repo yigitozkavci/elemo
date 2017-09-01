@@ -2,14 +2,10 @@
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
-{-# LANGUAGE NoMonomorphismRestriction       #-}
 
 module Game.Types where
 
@@ -24,7 +20,6 @@ import qualified Data.Map                 as Map
 import           Graphics.Gloss
 import           System.Random
 --------------------------------------------------------------------------------
-import           Data.Bijection
 import qualified Data.Heap                as Heap
 import           Data.Monoid              (mconcat, (<>))
 import qualified Data.PreservedMap        as PM
@@ -33,6 +28,7 @@ import qualified Data.Sequence.Queue      as Seq
 import qualified Data.Text                as T
 import           Game.Assets
 import           Game.Utils
+import           Game.Position
 import           Data.Fixed               (mod')
 --------------------------------------------------------------------------------
 
@@ -70,7 +66,6 @@ data World = World
   , _guiState      :: GUIState
   , _assets        :: Assets
   , _builtTowers   :: TileMap
-  , _randGen       :: StdGen
   , _projectiles   :: PM.Map Projectile
   , _playerInfo    :: PlayerInfo
   , _alerts        :: Seq.Queue T.Text
@@ -89,54 +84,8 @@ type Direction = (Int, Int)
 type Speed = Int
 type Damage = Int
 
-tileSize :: Int
-tileSize = 28
-
 class HasPicture m where
   getPicture :: m -> Picture
-
---------------------------------------------------------------------------------
-
--- Class of positions that are convertible. This class is implemented just
--- for ability to use one function to convert back-and-forth between two positions.
-class PosConvertible a b | a -> b where
-  convertPos :: a -> b
-
-posBi :: TilePosition :<->: AbsolutePosition
-posBi =
-  Bi (\(TilePosition pos) -> AbsolutePosition (scalePos pos))
-     (\(AbsolutePosition pos) -> TilePosition (unscalePos pos))
-
-newtype TilePosition = TilePosition { unwrapTilepos :: (Int, Int) }
-  deriving (Show, Eq, Ord)
-
-newtype AbsolutePosition = AbsolutePosition (Float, Float)
-  deriving (Show, Eq, Ord)
-
---------------------------------------------------------------------------------
-
-class Position a b | a -> b where
-  (+.) :: a -> a -> a
-  (-.) :: a -> a -> a
-  inside :: ((b, b) -> (b, b)) -> a -> a
-
-instance Position TilePosition Int where
-  TilePosition (x1, y1) +. TilePosition (x2, y2) = TilePosition (x1 + x2, y1 + y2)
-  TilePosition (x1, y1) -. TilePosition (x2, y2) = TilePosition (x1 - x2, y1 - y2)
-  inside f (TilePosition pos) = TilePosition (f pos)
-
-instance Position AbsolutePosition Float where
-  AbsolutePosition (x1, y1) +. AbsolutePosition (x2, y2) = AbsolutePosition (x1 + x2, y1 + y2)
-  AbsolutePosition (x1, y1) -. AbsolutePosition (x2, y2) = AbsolutePosition (x1 - x2, y1 - y2)
-  inside f (AbsolutePosition pos) = AbsolutePosition (f pos)
-
---------------------------------------------------------------------------------
-
-instance PosConvertible TilePosition AbsolutePosition where
-  convertPos = biTo posBi
-
-instance PosConvertible AbsolutePosition TilePosition where
-  convertPos = biFrom posBi
 
 --------------------------------------------------------------------------------
 
@@ -208,7 +157,7 @@ healthBar totalHealth health =
 instance HasPicture Monster where
   -- Fix the annotation. That type should be inferreble (maybe use fundeps?)
   getPicture (Monster pic _ (pos, _) _ tH h) =
-      translateImg (second (+ 30)  `inside` pos, healthBar tH h)
+      translateImg (second (+ 30)  `insidePos` pos, healthBar tH h)
     <> translateImg (pos, pic)
 
 instance HasPicture Projectile where
@@ -222,15 +171,6 @@ instance HasPicture TileMap where
   getPicture = Map.assocs
            >>> map (second getPicture >>> first convertPos >>> translateImg)
            >>> mconcat
-
-scalePos :: (Int, Int) -> (Float, Float)
-scalePos = both *~ tileSize >>> both %~ fromIntegral
-
-scaleWith :: Int -> (Int, Int) -> (Float, Float)
-scaleWith magn = both *~ magn >>> both %~ fromIntegral
-
-unscalePos :: (Float, Float) -> (Int, Int)
-unscalePos = (both %~ floor) >>> (both %~ (`div` tileSize))
 
 data PlayerInfo = PlayerInfo
   { _lives :: Int
@@ -259,20 +199,15 @@ makeLenses ''Projectile
 
 makeLenses ''World
 
--- | Here is the algorithm:
---
--- From (3, 2) to (10, 15) we don't just want this particule to move with (1, 1) vector. Instead, we want to move with probabilities (7/20, 13/20). This way we'll achieve a natural movement flow.
-moveTowards :: Int -> AbsolutePosition -> AbsolutePosition -> AbsolutePosition
-moveTowards rand (AbsolutePosition (x, y)) (AbsolutePosition (tX, tY)) =
-  AbsolutePosition (x + decide xP, y + decide yP)
+moveTowards :: AbsolutePosition -> AbsolutePosition -> AbsolutePosition
+moveTowards (AbsolutePosition (x, y)) (AbsolutePosition (tX, tY)) =
+  AbsolutePosition (x + xP, y + yP)
   where
     xD = tX - x
     yD = tY - y
     sum = abs xD + abs yD
     xP = xD / sum
     yP = yD / sum
-    decide :: Float -> Float
-    decide t = if abs t * 100 > fromIntegral (rand `mod` 100) then signum t else 0
 
 
 matchesTile :: AbsolutePosition -> Bool

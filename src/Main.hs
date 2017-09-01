@@ -26,13 +26,13 @@ import           Data.Tuple                       (swap)
 import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Interface.IO.Game
 import           Safe                             (headMay)
-import           System.Random                    (StdGen, getStdGen, next)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
 import           Game.Tilegen                     hiding (_tileMap)
 import           Game.Types
 import           Game.Utils
+import           Game.Position
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> TilePosition
@@ -136,7 +136,6 @@ update = do
   towerShootings
   globalTime += 1
   consumeSchedEvents
-  use monsters >>= \t -> logInfo $ T.pack (show t)
 
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
@@ -208,13 +207,6 @@ findClosestMonster pos range = do
         >>> headMay -- Maybe (ref, pos)
         >=> Just . fst -- Maybe ref
 
-getRandom :: SW Int
-getRandom = do
-  gen <- use randGen
-  let (val, newGen) = next gen
-  randGen .= newGen
-  return val
-
 targetExists :: PM.PMRef Monster -> SW Bool
 targetExists moRef =
   isJust . PM.lookup moRef <$> use monsters
@@ -246,8 +238,7 @@ speedSync :: Int -> Int -> Bool
 speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
 projectile :: PM.PMRef Monster -> ProjectileIterator
-projectile moRef (time, monsters) speed damage pos = do
-  rand <- getRandom
+projectile moRef (time, monsters) speed damage pos =
   if speedSync time speed then
     case PM.lookup moRef monsters of
       Nothing -> return Nothing -- When target is lost, this projectile should also disappear
@@ -257,7 +248,7 @@ projectile moRef (time, monsters) speed damage pos = do
           then
             Nothing <$ inflictDamage moRef damage
           else
-            return $ Just (moveTowards rand pos targetPos)
+            return $ Just (moveTowards pos targetPos)
   else
     return $ Just pos
 
@@ -272,7 +263,6 @@ inflictDamage moRef damage = do
         | monster ^. health < damage = return Nothing -- Monster dies
         | otherwise = do
           let newMonster = monster & health -~ damage
-          -- logInfo $ "Inflicted " <> T.pack (show damage) <> " damage to monster: " <> T.pack (show newMonster)
           return $ Just newMonster
 
 gameOver :: SW ()
@@ -329,8 +319,8 @@ tileFollower tile speed (pos, dir) = do
     posOfIntr =
       map (flip moveWithDir pos &&& (convertPos pos +.) &&&. id)
         [ dir
-        , inside swap dir
-        , dir & inside (swap >>> both *~ -1)
+        , insidePos swap dir
+        , dir & insidePos (swap >>> both *~ -1)
         ]
 
 moveWithDir :: TilePosition -> AbsolutePosition -> AbsolutePosition
@@ -455,8 +445,8 @@ nextLevel = do
   level += 1
   registerLevelEvents
 
-initWorld :: Assets -> StdGen -> World
-initWorld assets randGen = World
+initWorld :: Assets -> World
+initWorld assets = World
   { _level         = 0
   , _levelPic      = Blank
   , _monsters      = PM.empty
@@ -468,7 +458,6 @@ initWorld assets randGen = World
   , _guiState      = initGUIState assets
   , _assets        = assets
   , _builtTowers   = Map.empty
-  , _randGen       = randGen
   , _projectiles   = PM.empty
   , _playerInfo    = PlayerInfo 10 100
   , _alerts        = Q.empty
@@ -480,8 +469,7 @@ gameFreq = 1000
 main :: IO ()
 main = do
   assets <- genAssets
-  randGen <- getStdGen
-  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets randGen) $ runSW nextLevel
+  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets) $ runSW nextLevel
   playIO
     (InWindow "Nice Window" (700, 700) (0, 0))
     white

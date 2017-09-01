@@ -18,6 +18,7 @@ import           Prelude                  hiding (Left, Right)
 --------------------------------------------------------------------------------
 import           Game.Assets
 import           Game.Types
+import           Game.Position
 --------------------------------------------------------------------------------
 
 data TilegenState = TilegenState
