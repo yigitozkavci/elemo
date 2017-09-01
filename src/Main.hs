@@ -14,7 +14,6 @@ import           Control.Monad
 import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
-import qualified Data.ByteString                  as BS
 import           Data.Foldable                    (toList)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
@@ -37,6 +36,7 @@ import           Game.Position
 import           Game.Tilegen                     hiding (_tileMap)
 import           Game.Types
 import           Game.Utils
+import           Game.Impure                      (readTowers)
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> TilePosition
@@ -490,33 +490,6 @@ initWorld assets towers = World
 
 gameFreq :: Int
 gameFreq = 1000
-
-data RawTower = RawTower
-  { _rawTowerDamage :: Int 
-  , _rawTowerRange :: Int
-  , _rawTowerCost :: Int
-  , _rawTowerPicPath :: FilePath
-  }
-
-instance Y.FromJSON RawTower where
-  parseJSON (Y.Object v) =
-    RawTower
-      <$> v Y..: "damage"
-      <*> v Y..: "range"
-      <*> v Y..: "cost"
-      <*> v Y..: "picturePath"
-
-fromRaw :: RawTower -> IO Tower
-fromRaw (RawTower damage range cost picPath) = do
-  image <- loadBMP picPath
-  return $ Tower damage image range cost TowerNonLocked True
-
-readTowers :: IO (Seq.Seq Tower)
-readTowers = do
-  rawTowers :: Maybe [RawTower] <- Y.decode <$> BS.readFile "towers.yaml"
-  case rawTowers of
-    Nothing -> error "Cannot parse towers"
-    Just rawTowers -> Seq.fromList <$> forM rawTowers fromRaw
 
 main :: IO ()
 main = do
