@@ -124,6 +124,7 @@ data Monster = Monster
   , _vecIterator :: MonsterIterator
   , _totalHealth :: Int
   , _health      :: Int
+  , _goldYield   :: Int
   }
 
 data Projectile = Projectile
@@ -134,8 +135,16 @@ data Projectile = Projectile
   , _projectileIterator :: ProjectileIterator
   }
 
+-- | Functions are not showable, so we need custom instance.
 instance Show Monster where
-  show (Monster _pic speed currVec _it tH h) = "Monster { speed = " <> show speed <> ", currVec = " <> show currVec <> ", totalHealth = " <> show tH <> ", health = " <> show h <> "}"
+  show (Monster _pic speed currVec _it tH h gY) =
+    "Monster {"
+    <> "  speed = " <> show speed
+    <> ", currVec = " <> show currVec
+    <> ", totalHealth = " <> show tH
+    <> ", health = " <> show h
+    <> ", goldYield = " <> show gY
+    <> "}"
 
 translateImg :: (AbsolutePosition, Picture) -> Picture
 translateImg (AbsolutePosition (x, y), pic) = Translate x y pic
@@ -156,7 +165,7 @@ healthBar totalHealth health =
 
 instance HasPicture Monster where
   -- Fix the annotation. That type should be inferreble (maybe use fundeps?)
-  getPicture (Monster pic _ (pos, _) _ tH h) =
+  getPicture (Monster pic _ (pos, _) _ tH h _) =
       translateImg (second (+ 30)  `insidePos` pos, healthBar tH h)
     <> translateImg (pos, pic)
 

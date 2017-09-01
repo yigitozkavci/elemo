@@ -140,10 +140,10 @@ update = do
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
     moveMonster Nothing = return Nothing
-    moveMonster (Just (Monster pic speed vec f tH h)) =
+    moveMonster (Just monster@(Monster _ speed vec f _ _ _)) =
       f speed vec >>= \case
         Nothing     -> return Nothing
-        Just newVec -> return $ Just $ Monster pic speed newVec f tH h
+        Just newVec -> return $ Just monster { _currVec = newVec }
 
     moveProjectile :: Maybe Projectile -> SW (Maybe Projectile)
     moveProjectile Nothing = return Nothing
@@ -356,7 +356,6 @@ eventHandler = \case
               True -> do
                 builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
                 wTileMap %= Map.insert (adjustPosToIndex pos) (Floor False tile)
-                selectorState .= MouseFree
               False -> do
                 alerts' <- use alerts
                 addAlert "Not enough gold!"
@@ -413,6 +412,7 @@ getCentaur = do
     , _vecIterator = tileFollower grass
     , _totalHealth = 120
     , _health      = 120
+    , _goldYield   = 10
     }
 
 giveGold :: Int -> SW ()
@@ -425,12 +425,17 @@ registerLevelEvents = do
   level <- use level
   case level of
     1 -> do
-      pushMonsters (Just 1000) 3 500 =<< getCentaur
-      nextLevelIn 15000 -- Go to next level after 15 secs. (disabled for now)
+      pushMonsters (Just 1000) 1 500 =<< getCentaur
+      giveGold 70
+      nextLevelIn 7000
     2 -> do
-      pushMonsters (Just 500) 6 500 =<< getCentaur
+      pushMonsters (Just 500) 2 500 =<< getCentaur
+      giveGold 70
+      nextLevelIn 12000 -- Go to next level after 15 secs. (disabled for now)
+    3 -> do
+      pushMonsters (Just 500) 4 500 =<< getCentaur
       giveGold 100
-      -- nextLevelIn 15000 -- Go to next level after 15 secs. (disabled for now)
+      -- nextLevelIn 5000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
 nextLevelIn :: Int -> SW ()
@@ -459,7 +464,7 @@ initWorld assets = World
   , _assets        = assets
   , _builtTowers   = Map.empty
   , _projectiles   = PM.empty
-  , _playerInfo    = PlayerInfo 10 100
+  , _playerInfo    = PlayerInfo 10 0
   , _alerts        = Q.empty
   }
 
