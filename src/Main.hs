@@ -80,7 +80,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     lineAbs xs = Line $ map (\(AbsolutePosition pos) -> pos) xs
 
     towerLocking :: (TilePosition, UIObject) -> Picture
-    towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef))) =
+    towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef) _)) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
           Color red $ lineAbs [convertPos pos, fst (_currVec mo)]
@@ -91,7 +91,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerRanges = _builtTowers >>> Map.assocs >>> map towerRange >>> mconcat $ world
 
     towerRange :: (TilePosition, UIObject) -> Picture
-    towerRange (pos, UITower (Tower _ _ range _ _)) =
+    towerRange (pos, UITower (Tower _ _ range _ _ _)) =
       translateImg (convertPos pos, Color yellow $ Circle (fromIntegral range))
 
     paintAlerts :: Picture
@@ -126,33 +126,41 @@ tilegenGUI' = do
   let (TilegenState _ _ guiTileMap) = execTilegen assets' (tilegenGUI guiState')
   wTileMap <>= guiTileMap
 
+updateProjectile :: PM.PMRef Projectile -> (Projectile -> Projectile) -> SW ()
+updateProjectile ref f =
+  projectiles %= PM.update (\case Nothing -> Nothing; Just p -> Just (f p)) ref
+
+updateMonster :: PM.PMRef Monster -> (Monster -> Monster) -> SW ()
+updateMonster moRef f =
+  monsters %= PM.update (\case Nothing -> Nothing; Just monster -> Just (f monster)) moRef
+
 update :: SW ()
 update = do
   tilegenLevel'
   tilegenGUI'
   use builtTowers >>= (wTileMap <>=)
-  monsters <~ (PM.mapM moveMonster =<< use monsters)
-  projectiles <~ (PM.mapM moveProjectile =<< use projectiles)
-  towerShootings
-  globalTime += 1
   consumeSchedEvents
+  PM.assocs <$> use monsters >>= mapM_ moveMonster
+  PM.assocs <$> use projectiles >>= mapM_ moveProjectile
+  Map.assocs <$> use builtTowers >>= mapM_ handleTowerShooting
+  globalTime += 1
 
   where
-    moveMonster :: Maybe Monster -> SW (Maybe Monster)
-    moveMonster Nothing = return Nothing
-    moveMonster (Just monster@(Monster _ speed vec f _ _ _)) =
+    moveMonster :: (PM.PMRef Monster, Maybe Monster) -> SW ()
+    moveMonster (_, Nothing) = return ()
+    moveMonster (moRef, Just monster@(Monster _ speed vec f _ _ _)) =
       f speed vec >>= \case
-        Nothing     -> return Nothing
-        Just newVec -> return $ Just monster { _currVec = newVec }
+        Nothing -> monsters %= PM.delete moRef
+        Just newVec -> updateMonster moRef (currVec .~ newVec)
 
-    moveProjectile :: Maybe Projectile -> SW (Maybe Projectile)
-    moveProjectile Nothing = return Nothing
-    moveProjectile (Just (Projectile pic speed damage pos f)) = do
+    moveProjectile :: (PM.PMRef Projectile, Maybe Projectile) -> SW ()
+    moveProjectile (_, Nothing) = return ()
+    moveProjectile (ref, Just (Projectile pic speed damage pos f)) = do
       time <- use globalTime
       mos <- use monsters
       f (time, mos) speed damage pos >>= \case
-        Nothing     -> return Nothing
-        Just newPos -> return $ Just $ Projectile pic speed damage newPos f
+        Nothing -> projectiles %= PM.delete ref
+        Just position -> updateProjectile ref (projectilePosition .~ position)
 
     consumeSchedEvents :: SW ()
     consumeSchedEvents = do
@@ -164,30 +172,37 @@ update = do
           f -- Actual event mutation
           consumeSchedEvents
 
-    towerShootings :: SW ()
-    towerShootings = do
-      builtTowers' <- Map.assocs <$> gets _builtTowers
-      newTowers <- Map.fromList <$> forM builtTowers' towerShooting
-      builtTowers .= newTowers
-
-    towerShooting :: (TilePosition, UIObject) -> SW (TilePosition, UIObject)
-    towerShooting (pos, tower@(UITower (Tower dmg pic range cost lockState))) = do
+    handleTowerShooting :: (TilePosition, UIObject) -> SW ()
+    handleTowerShooting (pos, UITower tower@(Tower _dmg _pic range _cost lockState' canShoot')) = do
       monsters' <- use monsters
-      case lockState of
+      case lockState' of
         TowerNonLocked ->
           findClosestMonster (convertPos pos) range >>= \case
-            Nothing    -> return (pos, tower) -- Tower non locked and couldn't find a target
-            Just moRef -> do
-              -- Register shoot event here
-              startShooting (convertPos pos) range moRef
-              return (pos, UITower (Tower dmg pic range cost (TowerLocked moRef)))
+            Nothing    -> return () -- Tower non locked and couldn't find a target
+            Just moRef ->
+              lockTower pos moRef
         TowerLocked moRef ->
           case PM.lookup moRef monsters' of
-            Nothing -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is lost
-            Just monster ->
-              inRange (convertPos pos) range moRef >>= \case
-                True -> return (pos, tower) -- Target is alive and is in range
-                False -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is alive but gone out of range
+            Nothing ->
+              unlockTower pos
+            Just monster -> do
+              inRange' <- inRange (convertPos pos) range moRef
+              if inRange' then
+                when canShoot' $ shoot (pos, tower) range moRef
+              else
+                unlockTower pos
+
+lockTower :: TilePosition -> PM.PMRef Monster -> SW ()
+lockTower pos moRef =
+  updateTower pos (lockState .~ TowerLocked moRef)
+
+unlockTower :: TilePosition -> SW ()
+unlockTower pos =
+  updateTower pos (lockState .~ TowerNonLocked)
+
+updateTower :: TilePosition -> (Tower -> Tower) -> SW ()
+updateTower pos f =
+  builtTowers %= Map.update (\(UITower t) -> Just . UITower $ f t) pos
 
 addEvent :: Int -> T.Text -> SW () -> SW ()
 addEvent time' description ev = do
@@ -217,17 +232,14 @@ inRange pos range moRef =
     Nothing -> return False
     Just monster -> return $ distance pos (fst (_currVec monster)) < range
 
-startShooting :: AbsolutePosition -> Int -> PM.PMRef Monster -> SW ()
-startShooting pos range target = do
+shoot :: (TilePosition, Tower) -> Int -> PM.PMRef Monster -> SW ()
+shoot (pos, tower) range target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = Projectile fireballPic 150 12 pos (projectile target)
-      event = inRange pos range target >>= \case
-        True -> do
-          projectiles %|>>= Just fireballObj
-          addEvent 1000 "Start shooting" event
-        False -> return () -- If target doesn't exist, don't schedule more shooting events
-  addEvent 500 "Start shooting" event
+  let fireballObj = Projectile fireballPic 150 12 (convertPos pos) (projectile target)
+  projectiles %|>>= Just fireballObj
+  updateTower pos (canShoot .~ False) -- After this function is called, we restrict shooting of this tower no matter what.
+  addEvent 2000 "Allow shooting" $ updateTower pos (canShoot .~ True)
 
 updateIO :: Float -> World -> IO World
 updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update

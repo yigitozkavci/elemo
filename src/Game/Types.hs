@@ -40,8 +40,8 @@ data GUIState = GUIState
 initGUIState :: Assets -> GUIState
 initGUIState assets = GUIState
   { _guiTowers = Seq.fromList
-    [ Tower 10 (_whiteTower assets) 50 20 TowerNonLocked
-    , Tower 20 (_greenTower assets) 100 40 TowerNonLocked
+    [ Tower 10 (_whiteTower assets) 50 20 TowerNonLocked True
+    , Tower 20 (_greenTower assets) 100 40 TowerNonLocked True
     ]
   , _guiTowerPosMap = Map.empty
   }
@@ -115,6 +115,7 @@ data Tower = Tower
   , _range     :: Int
   , _towerCost :: Int
   , _lockState :: TowerLockState
+  , _canShoot  :: Bool
   } deriving (Show)
 
 data Monster = Monster

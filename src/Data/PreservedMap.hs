@@ -44,8 +44,11 @@ lookup (PMRef k) m =
 (!!) :: Map v -> PMRef v -> Maybe v
 m !! r = lookup r m
 
-delete :: Int -> Map v -> Map v
-delete = IM.update (const (Just Nothing))
+delete :: PMRef v -> Map v -> Map v
+delete (PMRef k) = IM.update (const (Just Nothing)) k
+
+update :: (Maybe v -> Maybe v) -> PMRef v -> IM.IntMap (Maybe v) -> IM.IntMap (Maybe v)
+update f (PMRef k) = IM.update (Just . f) k
 
 fromList :: [Maybe v] -> Map v
 fromList = foldl (\m v -> snd (m |> v)) empty
