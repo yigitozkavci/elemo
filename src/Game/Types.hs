@@ -121,13 +121,13 @@ class Position a b | a -> b where
   inside :: ((b, b) -> (b, b)) -> a -> a
 
 instance Position TilePosition Int where
-  TilePosition (x1, y1) +. TilePosition (x2, y2) = TilePosition (x1 + y1, x2 + y2)
-  TilePosition (x1, y1) -. TilePosition (x2, y2) = TilePosition (x1 - y1, x2 - y2)
+  TilePosition (x1, y1) +. TilePosition (x2, y2) = TilePosition (x1 + x2, y1 + y2)
+  TilePosition (x1, y1) -. TilePosition (x2, y2) = TilePosition (x1 - x2, y1 - y2)
   inside f (TilePosition pos) = TilePosition (f pos)
 
 instance Position AbsolutePosition Float where
-  AbsolutePosition (x1, y1) +. AbsolutePosition (x2, y2) = AbsolutePosition (x1 + y1, x2 + y2)
-  AbsolutePosition (x1, y1) -. AbsolutePosition (x2, y2) = AbsolutePosition (x1 - y1, x2 - y2)
+  AbsolutePosition (x1, y1) +. AbsolutePosition (x2, y2) = AbsolutePosition (x1 + x2, y1 + y2)
+  AbsolutePosition (x1, y1) -. AbsolutePosition (x2, y2) = AbsolutePosition (x1 - x2, y1 - y2)
   inside f (AbsolutePosition pos) = AbsolutePosition (f pos)
 
 --------------------------------------------------------------------------------
@@ -230,7 +230,7 @@ scaleWith :: Int -> (Int, Int) -> (Float, Float)
 scaleWith magn = both *~ magn >>> both %~ fromIntegral
 
 unscalePos :: (Float, Float) -> (Int, Int)
-unscalePos = both %~ (/ fromIntegral tileSize) >>> both %~ floor
+unscalePos = (both %~ floor) >>> (both %~ (`div` tileSize))
 
 data PlayerInfo = PlayerInfo
   { _lives :: Int
