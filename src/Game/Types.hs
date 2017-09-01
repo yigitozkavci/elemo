@@ -20,16 +20,16 @@ import qualified Data.Map                 as Map
 import           Graphics.Gloss
 import           System.Random
 --------------------------------------------------------------------------------
+import           Data.Fixed               (mod')
 import qualified Data.Heap                as Heap
 import           Data.Monoid              (mconcat, (<>))
 import qualified Data.PreservedMap        as PM
 import qualified Data.Sequence            as Seq
-import qualified Data.Sequence.Queue      as Seq
+import qualified Data.Sequence.Queue      as Q
 import qualified Data.Text                as T
 import           Game.Assets
-import           Game.Utils
 import           Game.Position
-import           Data.Fixed               (mod')
+import           Game.Utils
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
@@ -39,10 +39,7 @@ data GUIState = GUIState
 
 initGUIState :: Assets -> GUIState
 initGUIState assets = GUIState
-  { _guiTowers = Seq.fromList
-    [ Tower 10 (_whiteTower assets) 50 20 TowerNonLocked True
-    , Tower 20 (_greenTower assets) 100 40 TowerNonLocked True
-    ]
+  { _guiTowers = Seq.empty
   , _guiTowerPosMap = Map.empty
   }
 
@@ -68,7 +65,7 @@ data World = World
   , _builtTowers   :: TileMap
   , _projectiles   :: PM.Map Projectile
   , _playerInfo    :: PlayerInfo
-  , _alerts        :: Seq.Queue T.Text
+  , _alerts        :: Q.Queue T.Text
   }
 
 newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
@@ -218,7 +215,6 @@ moveTowards (AbsolutePosition (x, y)) (AbsolutePosition (tX, tY)) =
     sum = abs xD + abs yD
     xP = xD / sum
     yP = yD / sum
-
 
 matchesTile :: AbsolutePosition -> Bool
 matchesTile (AbsolutePosition (x, y)) =

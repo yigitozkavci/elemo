@@ -30,4 +30,7 @@ executable Main
     sequence,
     text,
     zippers,
-    TypeCompose
+    TypeCompose,
+    yaml,
+    vector,
+    bytestring

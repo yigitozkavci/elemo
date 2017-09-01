@@ -1,38 +1,42 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
 import           Control.Applicative.Extra
 import           Control.Arrow.Extra
-import           Control.Lens hiding (inside)
+import           Control.Lens                     hiding (inside)
 import           Control.Lens.Operators
 import           Control.Monad
 import           Control.Monad.Logger             (runStdoutLoggingT)
 import           Control.Monad.Logger.CallStack   (logInfo)
 import           Control.Monad.State              (execStateT, gets, modify)
+import qualified Data.ByteString                  as BS
+import           Data.Foldable                    (toList)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
-import Data.Foldable (toList)
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, isJust, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
+import qualified Data.Sequence                    as Seq
 import qualified Data.Sequence.Queue              as Q
 import qualified Data.Text                        as T
 import           Data.Tuple                       (swap)
+import qualified Data.Vector                      as V
+import qualified Data.Yaml                        as Y
 import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Interface.IO.Game
 import           Safe                             (headMay)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
+import           Game.Position
 import           Game.Tilegen                     hiding (_tileMap)
 import           Game.Types
 import           Game.Utils
-import           Game.Position
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> TilePosition
@@ -381,7 +385,7 @@ eventHandler = \case
   _ -> return ()
 
 instance Show a => Show (Q.Queue a) where
-  show (Q.viewl -> Q.EmptyL) = "_"
+  show (Q.viewl -> Q.EmptyL)     = "_"
   show (Q.viewl -> val Q.:< rem) = show val <> " -> " <> show rem
 
 eventHandlerIO :: Event -> World -> IO World
@@ -466,8 +470,8 @@ nextLevel = do
   level += 1
   registerLevelEvents
 
-initWorld :: Assets -> World
-initWorld assets = World
+initWorld :: Assets -> Seq.Seq Tower -> World
+initWorld assets towers = World
   { _level         = 0
   , _levelPic      = Blank
   , _monsters      = PM.empty
@@ -476,7 +480,7 @@ initWorld assets = World
   , _schedEvents   = Heap.empty
   , _selectorState = MouseFree
   , _mousePos      = (0.0, 0.0)
-  , _guiState      = initGUIState assets
+  , _guiState      = (initGUIState assets) { _guiTowers = towers }
   , _assets        = assets
   , _builtTowers   = Map.empty
   , _projectiles   = PM.empty
@@ -487,10 +491,38 @@ initWorld assets = World
 gameFreq :: Int
 gameFreq = 1000
 
+data RawTower = RawTower
+  { _rawTowerDamage :: Int 
+  , _rawTowerRange :: Int
+  , _rawTowerCost :: Int
+  , _rawTowerPicPath :: FilePath
+  }
+
+instance Y.FromJSON RawTower where
+  parseJSON (Y.Object v) =
+    RawTower
+      <$> v Y..: "damage"
+      <*> v Y..: "range"
+      <*> v Y..: "cost"
+      <*> v Y..: "picturePath"
+
+fromRaw :: RawTower -> IO Tower
+fromRaw (RawTower damage range cost picPath) = do
+  image <- loadBMP picPath
+  return $ Tower damage image range cost TowerNonLocked True
+
+readTowers :: IO (Seq.Seq Tower)
+readTowers = do
+  rawTowers :: Maybe [RawTower] <- Y.decode <$> BS.readFile "towers.yaml"
+  case rawTowers of
+    Nothing -> error "Cannot parse towers"
+    Just rawTowers -> Seq.fromList <$> forM rawTowers fromRaw
+
 main :: IO ()
 main = do
   assets <- genAssets
-  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets) $ runSW nextLevel
+  towers <- readTowers
+  initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets towers) $ runSW nextLevel
   playIO
     (InWindow "Nice Window" (700, 700) (0, 0))
     white
