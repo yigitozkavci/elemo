@@ -7,9 +7,8 @@ module Main where
 
 --------------------------------------------------------------------------------
 import           Control.Applicative.Extra
-import           Control.Arrow                    (first, second, (&&&), (***),
-                                                   (>>>))
-import           Control.Lens
+import           Control.Arrow.Extra
+import           Control.Lens hiding (inside)
 import           Control.Lens.Operators
 import           Control.Monad
 import           Control.Monad.Logger             (runStdoutLoggingT)
@@ -77,11 +76,14 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerLockings :: Picture
     towerLockings = mconcat $ map towerLocking $ Map.assocs (_builtTowers world)
 
+    lineAbs :: [AbsolutePosition] -> Picture
+    lineAbs xs = Line $ map (\(AbsolutePosition pos) -> pos) xs
+
     towerLocking :: (TilePosition, UIObject) -> Picture
     towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef))) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
-          Color red $ Line [scalePos pos & both %~ fromIntegral, fst (_currVec mo) & both %~ fromIntegral]
+          Color red $ lineAbs [convertPos pos, fst (_currVec mo)]
         Nothing -> mempty -- This is temporary second until tower finds a new target.
     towerLocking _ = mempty
 
@@ -90,7 +92,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
 
     towerRange :: (TilePosition, UIObject) -> Picture
     towerRange (pos, UITower (Tower _ _ range _ _)) =
-      translateImg (scalePos pos, Color yellow $ Circle (fromIntegral range))
+      translateImg (convertPos pos, Color yellow $ Circle (fromIntegral range))
 
     paintAlerts :: Picture
     paintAlerts = Translate 200 (-300) $ paintAlerts' (_alerts world)
@@ -134,7 +136,7 @@ update = do
   towerShootings
   globalTime += 1
   consumeSchedEvents
-  use monsters >>= \m' -> logInfo $ T.pack (show m')
+  use monsters >>= \t -> logInfo $ T.pack (show t)
 
   where
     moveMonster :: Maybe Monster -> SW (Maybe Monster)
@@ -174,17 +176,17 @@ update = do
       monsters' <- use monsters
       case lockState of
         TowerNonLocked ->
-          findClosestMonster (scalePos pos) range >>= \case
+          findClosestMonster (convertPos pos) range >>= \case
             Nothing    -> return (pos, tower) -- Tower non locked and couldn't find a target
             Just moRef -> do
               -- Register shoot event here
-              startShooting (scalePos pos) range moRef
+              startShooting (convertPos pos) range moRef
               return (pos, UITower (Tower dmg pic range cost (TowerLocked moRef)))
         TowerLocked moRef ->
           case PM.lookup moRef monsters' of
             Nothing -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is lost
             Just monster ->
-              inRange (scalePos pos) range moRef >>= \case
+              inRange (convertPos pos) range moRef >>= \case
                 True -> return (pos, tower) -- Target is alive and is in range
                 False -> return (pos, UITower (Tower dmg pic range cost TowerNonLocked)) -- Target is alive but gone out of range
 
@@ -193,7 +195,7 @@ addEvent time' description ev = do
   globalTime' <- use globalTime
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') (description, ev))
 
-findClosestMonster :: Position -> Int -> SW (Maybe (PM.PMRef Monster))
+findClosestMonster :: AbsolutePosition -> Int -> SW (Maybe (PM.PMRef Monster))
 findClosestMonster pos range = do
   monsters' <- use monsters
   return $ monsters' & findClosest
@@ -217,13 +219,13 @@ targetExists :: PM.PMRef Monster -> SW Bool
 targetExists moRef =
   isJust . PM.lookup moRef <$> use monsters
 
-inRange :: Position -> Int -> PM.PMRef Monster -> SW Bool
+inRange :: AbsolutePosition -> Int -> PM.PMRef Monster -> SW Bool
 inRange pos range moRef =
   PM.lookup moRef <$> use monsters >>= \case
     Nothing -> return False
     Just monster -> return $ distance pos (fst (_currVec monster)) < range
 
-startShooting :: Position -> Int -> PM.PMRef Monster -> SW ()
+startShooting :: AbsolutePosition -> Int -> PM.PMRef Monster -> SW ()
 startShooting pos range target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
@@ -244,13 +246,13 @@ speedSync :: Int -> Int -> Bool
 speedSync time speed = time `mod` (gameFreq `div` speed) == 0
 
 projectile :: PM.PMRef Monster -> ProjectileIterator
-projectile moRef (time, monsters) speed damage pos@(x, y) = do
+projectile moRef (time, monsters) speed damage pos = do
   rand <- getRandom
   if speedSync time speed then
     case PM.lookup moRef monsters of
       Nothing -> return Nothing -- When target is lost, this projectile should also disappear
       Just target ->
-        let (targetPos@(targetX, targetY), _dir) = _currVec target in
+        let (targetPos, _dir) = _currVec target in
         if distance pos targetPos < 5
           then
             Nothing <$ inflictDamage moRef damage
@@ -281,36 +283,34 @@ reduceLife = do
   lives' <- playerInfo . lives <-= 1
   when (lives' <= 0) gameOver
 
-tileSum :: TilePosition -> TilePosition -> TilePosition
-tileSum (TilePosition x) (TilePosition y) = TilePosition (tupleSum x y)
-
 tileFollower :: Picture -> MonsterIterator
-tileFollower tile speed ((x, y), dir) = do
+tileFollower tile speed (pos, dir) = do
   tileMap' <- use wTileMap
   time <- use globalTime
   if speedSync time speed then
-    if x `mod` tileSize == 0 && y `mod` tileSize == 0 then
+    if matchesTile pos then
       case availablePositions tileMap' of
         []    -> Nothing <$ reduceLife
         (x:_) -> return $ Just x
     else
-      return $ Just (tupleSum (x, y) dir, dir)
+      let TilePosition dir' = dir
+          dir'' = AbsolutePosition (dir' & both %~ fromIntegral)
+      in
+          return $ Just (pos +. dir'', dir)
   else
-    return $ Just ((x, y), dir)
+    return $ Just (pos, dir)
   where
     availablePositions tileMap' =
         -- Accept only positions that are matching to the given tile type from points of interest
-        filter (\(pos, dir) ->
-          case Map.lookup (unscalePos pos) tileMap' of
+        filter (\(result, test, dir) ->
+          case Map.lookup test tileMap' of
             Just obj
               | getPicture obj == tile -> True
             _ -> False
         )
         -- After filtering, direction addings must be cut. We don't want `tileSize` amount
         -- of movement, afterall.
-        >>> map (\(pos, TilePosition dir) ->
-          (tupleSum pos (dir & both *~ (1 - tileSize)), dir)
-          )
+        >>> map (\(result, _test, dir) -> (result, dir))
         $ posOfIntr
 
     -- Positions of interest. For position (28, 56) and direction (1, 0),
@@ -323,14 +323,18 @@ tileFollower tile speed ((x, y), dir) = do
     -- ox.o
     -- o.oo
     --
-    -- For arrow computation,  left computes positions, right computes directions
-    posOfIntr :: [(Position, TilePosition)]
+    -- For arrow computation;
+    -- ('result of moving', 'tile position to check', 'original direction')
+    posOfIntr :: [(AbsolutePosition, TilePosition, TilePosition)]
     posOfIntr =
-      map ((TilePosition >>> scalePos >>> (`tupleSum` (x, y))) &&& TilePosition)
+      map (flip moveWithDir pos &&& (convertPos pos +.) &&&. id)
         [ dir
-        , swap dir
-        , dir & (swap >>> both *~ -1)
+        , inside swap dir
+        , dir & inside (swap >>> both *~ -1)
         ]
+
+moveWithDir :: TilePosition -> AbsolutePosition -> AbsolutePosition
+moveWithDir (TilePosition dir) = (+.) $ AbsolutePosition (dir & both %~ fromIntegral)
 
 --------------------------------------------------------------------------------
 
@@ -414,7 +418,7 @@ getCentaur = do
   grass <- use $ assets . grass
   return Monster
     { _moPicture   = pic
-    , _currVec     = ((28, 0), (1, 0))
+    , _currVec     = (TilePosition (1, 0) & convertPos, TilePosition (1, 0))
     , _speed       = 50
     , _vecIterator = tileFollower grass
     , _totalHealth = 120

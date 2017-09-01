@@ -29,4 +29,5 @@ executable Main
     safe,
     sequence,
     text,
-    zippers
+    zippers,
+    TypeCompose

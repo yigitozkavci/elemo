@@ -1,29 +1,39 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE NoMonomorphismRestriction       #-}
 
 module Game.Types where
 
 --------------------------------------------------------------------------------
-import           Control.Arrow     ((>>>), first, second)
-import           Control.Lens
-import qualified Data.Map          as Map
+import           Control.Arrow            (first, second, (>>>))
+import           Control.Lens             hiding (inside)
 import           Control.Monad.Logger     (LoggingT, MonadLogger,
                                            runStdoutLoggingT)
 import           Control.Monad.State
 import           Control.Monad.State.Lazy
+import qualified Data.Map                 as Map
 import           Graphics.Gloss
-import System.Random
+import           System.Random
 --------------------------------------------------------------------------------
-import           Data.Monoid       ((<>), mconcat)
-import qualified Data.PreservedMap as PM
-import qualified Data.Heap as Heap
-import Game.Assets
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Sequence.Queue as Seq
+import           Data.Bijection
+import qualified Data.Heap                as Heap
+import           Data.Monoid              (mconcat, (<>))
+import qualified Data.PreservedMap        as PM
+import qualified Data.Sequence            as Seq
+import qualified Data.Sequence.Queue      as Seq
+import qualified Data.Text                as T
+import           Game.Assets
+import           Game.Utils
+import           Data.Fixed               (mod')
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
@@ -70,7 +80,6 @@ newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
   deriving (Functor, Applicative, Monad, MonadState World, MonadLogger, MonadIO)
 
 type GlobalTime = Int -- In miliseconds
-type Position = (Int, Int)
 
 -- (1, 0) : Right
 -- (0, -1): Down
@@ -86,14 +95,56 @@ tileSize = 28
 class HasPicture m where
   getPicture :: m -> Picture
 
-newtype TilePosition = TilePosition (Int, Int)
+--------------------------------------------------------------------------------
+
+-- Class of positions that are convertible. This class is implemented just
+-- for ability to use one function to convert back-and-forth between two positions.
+class PosConvertible a b | a -> b where
+  convertPos :: a -> b
+
+posBi :: TilePosition :<->: AbsolutePosition
+posBi =
+  Bi (\(TilePosition pos) -> AbsolutePosition (scalePos pos))
+     (\(AbsolutePosition pos) -> TilePosition (unscalePos pos))
+
+newtype TilePosition = TilePosition { unwrapTilepos :: (Int, Int) }
   deriving (Show, Eq, Ord)
+
+newtype AbsolutePosition = AbsolutePosition (Float, Float)
+  deriving (Show, Eq, Ord)
+
+--------------------------------------------------------------------------------
+
+class Position a b | a -> b where
+  (+.) :: a -> a -> a
+  (-.) :: a -> a -> a
+  inside :: ((b, b) -> (b, b)) -> a -> a
+
+instance Position TilePosition Int where
+  TilePosition (x1, y1) +. TilePosition (x2, y2) = TilePosition (x1 + y1, x2 + y2)
+  TilePosition (x1, y1) -. TilePosition (x2, y2) = TilePosition (x1 - y1, x2 - y2)
+  inside f (TilePosition pos) = TilePosition (f pos)
+
+instance Position AbsolutePosition Float where
+  AbsolutePosition (x1, y1) +. AbsolutePosition (x2, y2) = AbsolutePosition (x1 + y1, x2 + y2)
+  AbsolutePosition (x1, y1) -. AbsolutePosition (x2, y2) = AbsolutePosition (x1 - y1, x2 - y2)
+  inside f (AbsolutePosition pos) = AbsolutePosition (f pos)
+
+--------------------------------------------------------------------------------
+
+instance PosConvertible TilePosition AbsolutePosition where
+  convertPos = biTo posBi
+
+instance PosConvertible AbsolutePosition TilePosition where
+  convertPos = biFrom posBi
+
+--------------------------------------------------------------------------------
 
 type TileMap = Map.Map TilePosition UIObject
 
-type MonsterIterator = Speed -> (Position, Direction) -> SW (Maybe (Position, Direction))
+type MonsterIterator = Speed -> (AbsolutePosition, TilePosition) -> SW (Maybe (AbsolutePosition, TilePosition))
 
-type ProjectileIterator = (GlobalTime, PM.Map Monster) -> Speed -> Damage -> Position -> SW (Maybe Position)
+type ProjectileIterator = (GlobalTime, PM.Map Monster) -> Speed -> Damage -> AbsolutePosition -> SW (Maybe AbsolutePosition)
 
 data UIObject =
     Floor Bool Picture -- (Floor isPlacable picture)
@@ -101,7 +152,7 @@ data UIObject =
   deriving (Show)
 
 instance HasPicture UIObject where
-  getPicture (Floor _ pic) = pic
+  getPicture (Floor _ pic)                    = pic
   getPicture (UITower Tower { _image = pic }) = pic
 
 data TowerLockState =
@@ -120,31 +171,31 @@ data Tower = Tower
 data Monster = Monster
   { _moPicture   :: Picture
   , _speed       :: Speed
-  , _currVec     :: (Position, Direction)
+  , _currVec     :: (AbsolutePosition, TilePosition)
   , _vecIterator :: MonsterIterator
   , _totalHealth :: Int
   , _health      :: Int
   }
 
 data Projectile = Projectile
-  { _projectilePicture :: Picture
-  , _projectileSpeed :: Speed
-  , _projectileDamage :: Damage
-  , _projectilePosition :: Position
+  { _projectilePicture  :: Picture
+  , _projectileSpeed    :: Speed
+  , _projectileDamage   :: Damage
+  , _projectilePosition :: AbsolutePosition
   , _projectileIterator :: ProjectileIterator
   }
 
 instance Show Monster where
   show (Monster _pic speed currVec _it tH h) = "Monster { speed = " <> show speed <> ", currVec = " <> show currVec <> ", totalHealth = " <> show tH <> ", health = " <> show h <> "}"
 
-translateImg :: (Position, Picture) -> Picture
-translateImg ((x, y), pic) = Translate (fromIntegral x) (fromIntegral y) pic
+translateImg :: (AbsolutePosition, Picture) -> Picture
+translateImg (AbsolutePosition (x, y), pic) = Translate x y pic
 
 healthBarWidth :: Fractional f => f
 healthBarWidth = 30
 
 healthBar :: Int -> Int -> Picture
-healthBar totalHealth health = 
+healthBar totalHealth health =
   let
     remainingLife = healthBarWidth * (fromIntegral health / fromIntegral totalHealth)
     lostLife = healthBarWidth - remainingLife
@@ -155,8 +206,9 @@ healthBar totalHealth health =
     Translate (- lostLife / 2) 0.0 $ greenPart <> redPart
 
 instance HasPicture Monster where
+  -- Fix the annotation. That type should be inferreble (maybe use fundeps?)
   getPicture (Monster pic _ (pos, _) _ tH h) =
-       translateImg (second (+30) pos, healthBar tH h)
+      translateImg (second (+ 30)  `inside` pos, healthBar tH h)
     <> translateImg (pos, pic)
 
 instance HasPicture Projectile where
@@ -168,14 +220,17 @@ instance HasPicture a => HasPicture (PM.Map a) where
 
 instance HasPicture TileMap where
   getPicture = Map.assocs
-           >>> map (second getPicture >>> first scalePos >>> translateImg)
+           >>> map (second getPicture >>> first convertPos >>> translateImg)
            >>> mconcat
 
-scalePos :: TilePosition -> (Int, Int)
-scalePos (TilePosition pos) = pos & both *~ tileSize
+scalePos :: (Int, Int) -> (Float, Float)
+scalePos = both *~ tileSize >>> both %~ fromIntegral
 
-unscalePos :: (Int, Int) -> TilePosition
-unscalePos pos = TilePosition $ pos & both %~ (`div` tileSize)
+scaleWith :: Int -> (Int, Int) -> (Float, Float)
+scaleWith magn = both *~ magn >>> both %~ fromIntegral
+
+unscalePos :: (Float, Float) -> (Int, Int)
+unscalePos = both %~ (/ fromIntegral tileSize) >>> both %~ floor
 
 data PlayerInfo = PlayerInfo
   { _lives :: Int
@@ -188,12 +243,12 @@ smallText = Scale 0.1 0.1 . Text
 
 smallTexts :: [(String, String)] -> Picture
 smallTexts [] = mempty
-smallTexts ((desc, val):xs) = 
+smallTexts ((desc, val):xs) =
   Scale 0.1 0.1 (Text (desc <> ": " <> val))
   <> Translate 0 (-20) (smallTexts xs)
 
 instance HasPicture PlayerInfo where
-  getPicture (PlayerInfo lives gold) = 
+  getPicture (PlayerInfo lives gold) =
     smallTexts [ ("Lives", show lives)
                , ("Gold", show gold)
                ]
@@ -203,3 +258,27 @@ makeLenses ''Monster
 makeLenses ''Projectile
 
 makeLenses ''World
+
+-- | Here is the algorithm:
+--
+-- From (3, 2) to (10, 15) we don't just want this particule to move with (1, 1) vector. Instead, we want to move with probabilities (7/20, 13/20). This way we'll achieve a natural movement flow.
+moveTowards :: Int -> AbsolutePosition -> AbsolutePosition -> AbsolutePosition
+moveTowards rand (AbsolutePosition (x, y)) (AbsolutePosition (tX, tY)) =
+  AbsolutePosition (x + decide xP, y + decide yP)
+  where
+    xD = tX - x
+    yD = tY - y
+    sum = abs xD + abs yD
+    xP = xD / sum
+    yP = yD / sum
+    decide :: Float -> Float
+    decide t = if abs t * 100 > fromIntegral (rand `mod` 100) then signum t else 0
+
+
+matchesTile :: AbsolutePosition -> Bool
+matchesTile (AbsolutePosition (x, y)) =
+  floor x `mod` tileSize == 0 && floor y `mod` tileSize == 0
+
+distance :: AbsolutePosition -> AbsolutePosition -> Int
+distance (AbsolutePosition (x1, y1)) (AbsolutePosition (x2, y2)) = floor $ sqrt $ (x1 - x2) ^ 2 + (y1 - y2) ^ 2
+
