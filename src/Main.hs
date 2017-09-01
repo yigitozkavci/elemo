@@ -56,7 +56,11 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
              <> towerLockings
              <> towerRanges
              <> Translate (-300) 300 (getPicture (world ^. playerInfo))
-             <> paintAlerts
+             <> Translate 200 (-60) (smallText "ALERTS")
+             <> Translate 200 (-70) (smallText "======")
+             <> Translate 200 (-100) paintAlerts
+             <> Translate (-200) (-60) (smallText "EVENTS")
+             <> Translate (-200) (-70) (smallText "======")
              <> Translate (-200) (-100) eventDebugScreen
   where
     mouseCursor :: Picture
@@ -95,11 +99,11 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
       translateImg (convertPos pos, Color yellow $ Circle (fromIntegral range))
 
     paintAlerts :: Picture
-    paintAlerts = Translate 200 (-300) $ paintAlerts' (_alerts world)
+    paintAlerts = paintAlerts' (_alerts world)
 
     paintAlerts' :: Q.Queue T.Text -> Picture
     paintAlerts' (Q.viewl -> Q.EmptyL) = mempty
-    paintAlerts' (Q.viewl -> txt Q.:< queue) = smallText (show txt) <> Translate 0 30 (paintAlerts' queue)
+    paintAlerts' (Q.viewl -> txt Q.:< queue) = smallText (show txt) <> Translate 0 (-30) (paintAlerts' queue)
 
     eventDebugScreen :: Picture
     eventDebugScreen =
