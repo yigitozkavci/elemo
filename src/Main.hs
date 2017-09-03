@@ -6,8 +6,8 @@
 module Main where
 
 --------------------------------------------------------------------------------
-import           Control.Applicative.Extra
-import           Control.Arrow.Extra
+import           Control.Applicative.Extended
+import           Control.Arrow.Extended
 import           Control.Lens                     hiding (inside)
 import           Control.Lens.Operators
 import           Control.Monad
@@ -17,7 +17,7 @@ import           Control.Monad.State              (execStateT, gets, modify)
 import           Data.Foldable                    (toList)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
-import qualified Data.Map.Extra                   as Map
+import qualified Data.Map.Extended                as Map
 import           Data.Maybe                       (fromMaybe, isJust, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
 import qualified Data.Sequence                    as Seq

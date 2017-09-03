@@ -1,6 +1,6 @@
-module Data.Map.Extra (
+module Data.Map.Extended (
   module Data.Map,
-  module Data.Map.Extra
+  module Data.Map.Extended
 ) where
 
 --------------------------------------------------------------------------------

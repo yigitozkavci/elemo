@@ -1,8 +1,8 @@
 {-# LANGUAGE LambdaCase          #-}
 
-module Control.Applicative.Extra (
+module Control.Applicative.Extended (
   module Control.Applicative,
-  module Control.Applicative.Extra
+  module Control.Applicative.Extended
 ) where
 
 import Control.Applicative

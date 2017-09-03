@@ -1,6 +1,6 @@
-module Control.Arrow.Extra (
+module Control.Arrow.Extended (
   module Control.Arrow,
-  module Control.Arrow.Extra
+  module Control.Arrow.Extended
 ) where
 
 import Control.Arrow
