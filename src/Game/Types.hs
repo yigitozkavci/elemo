@@ -30,6 +30,7 @@ import qualified Data.Text                as T
 import           Game.Assets
 import           Game.Position
 import           Game.Utils
+import           Game.Direction
 --------------------------------------------------------------------------------
 
 data GUIState = GUIState
@@ -73,11 +74,6 @@ newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
 
 type GlobalTime = Int -- In miliseconds
 
--- (1, 0) : Right
--- (0, -1): Down
--- (-1, 0): Left
--- (0, 1) : Top
-type Direction = (Int, Int)
 type Speed = Int
 type Damage = Int
 
@@ -88,7 +84,7 @@ class HasPicture m where
 
 type TileMap = Map.Map TilePosition UIObject
 
-type MonsterIterator = Speed -> (AbsolutePosition, TilePosition) -> SW (Maybe (AbsolutePosition, TilePosition))
+type MonsterIterator = Speed -> (AbsolutePosition, Direction) -> SW (Maybe (AbsolutePosition, Direction))
 
 type ProjectileIterator = (GlobalTime, PM.Map Monster) -> Speed -> Damage -> AbsolutePosition -> SW (Maybe AbsolutePosition)
 
@@ -118,7 +114,7 @@ data Tower = Tower
 data Monster = Monster
   { _moPicture   :: Picture
   , _speed       :: Speed
-  , _currVec     :: (AbsolutePosition, TilePosition)
+  , _currVec     :: (AbsolutePosition, Direction)
   , _vecIterator :: MonsterIterator
   , _totalHealth :: Int
   , _health      :: Int
@@ -222,4 +218,3 @@ matchesTile (AbsolutePosition (x, y)) =
 
 distance :: AbsolutePosition -> AbsolutePosition -> Int
 distance (AbsolutePosition (x1, y1)) (AbsolutePosition (x2, y2)) = floor $ sqrt $ (x1 - x2) ^ 2 + (y1 - y2) ^ 2
-

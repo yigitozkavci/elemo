@@ -37,6 +37,7 @@ import           Game.Tilegen                     hiding (_tileMap)
 import           Game.Types
 import           Game.Utils
 import           Game.Impure                      (readTowers)
+import           Game.Direction
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> TilePosition
@@ -242,7 +243,7 @@ inRange pos range moRef =
 
 shoot :: (TilePosition, Tower) -> Int -> PM.PMRef Monster -> SW ()
 shoot (pos, tower) range target = do
-  globalTime' <- gets _globalTime
+  globalTime' <- use globalTime
   fireballPic <- use (assets . moAssets . fireball)
   let fireballObj = Projectile fireballPic 150 (_damage tower) (convertPos pos) (projectile target)
   projectiles %|>>= Just fireballObj
@@ -274,13 +275,14 @@ projectile moRef (time, monsters) speed damage pos =
 
 inflictDamage :: PM.PMRef Monster -> Damage -> SW ()
 inflictDamage moRef damage = do
+  -- Replace with monster ref map mapping
   mos <- use monsters
   monsters <~ PM.mapMWithKey (\ref' mbmon -> if ref' == moRef then inflictDamage' mbmon else return mbmon) mos
     where
       inflictDamage' :: Maybe Monster -> SW (Maybe Monster)
       inflictDamage' Nothing = return Nothing
       inflictDamage' (Just monster)
-        | monster ^. health < damage = Nothing <$ giveGold (monster ^. goldYield)-- Monster dies
+        | monster ^. health < damage = Nothing <$ giveGold (monster ^. goldYield) -- Monster dies
         | otherwise = do
           let newMonster = monster & health -~ damage
           return $ Just newMonster
@@ -303,7 +305,7 @@ tileFollower tile speed (pos, dir) = do
         []    -> Nothing <$ reduceLife
         (x:_) -> return $ Just x
     else
-      let TilePosition dir' = dir
+      let TilePosition dir' = serializeDir dir
           dir'' = AbsolutePosition (dir' & both %~ fromIntegral)
       in
           return $ Just (pos +. dir'', dir)
@@ -335,13 +337,10 @@ tileFollower tile speed (pos, dir) = do
     --
     -- For arrow computation;
     -- ('result of moving', 'tile position to check', 'original direction')
-    posOfIntr :: [(AbsolutePosition, TilePosition, TilePosition)]
+    posOfIntr :: [(AbsolutePosition, TilePosition, Direction)]
     posOfIntr =
-      map (flip moveWithDir pos &&& (convertPos pos +.) &&&. id)
-        [ dir
-        , insidePos swap dir
-        , dir & insidePos (swap >>> both *~ -1)
-        ]
+      map ((serializeDir >>> flip moveWithDir pos) &&& (serializeDir >>> (convertPos pos +.)) &&&. id)
+        (arrowDir dir)
 
 moveWithDir :: TilePosition -> AbsolutePosition -> AbsolutePosition
 moveWithDir (TilePosition dir) = (+.) $ AbsolutePosition (dir & both %~ fromIntegral)
@@ -427,7 +426,7 @@ getCentaur = do
   grass <- use $ assets . grass
   return Monster
     { _moPicture   = pic
-    , _currVec     = (TilePosition (1, 0) & convertPos, TilePosition (1, 0))
+    , _currVec     = (TilePosition (1, 0) & convertPos, DRight)
     , _speed       = 50
     , _vecIterator = tileFollower grass
     , _totalHealth = 120
