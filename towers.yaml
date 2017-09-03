@@ -1,8 +1,8 @@
-- damage: 10
+- damage: 20
   range: 50
   cost: 20
   picturePath: "assets/dc-dngn/altars/dngn_altar_elyvilon.bmp"
-- damage: 20
+- damage: 50
   range: 100
   cost: 40
   picturePath: "assets/dc-dngn/altars/dngn_altar_jiyva02.bmp"

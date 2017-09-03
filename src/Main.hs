@@ -244,7 +244,7 @@ shoot :: (TilePosition, Tower) -> Int -> PM.PMRef Monster -> SW ()
 shoot (pos, tower) range target = do
   globalTime' <- gets _globalTime
   fireballPic <- use (assets . moAssets . fireball)
-  let fireballObj = Projectile fireballPic 150 12 (convertPos pos) (projectile target)
+  let fireballObj = Projectile fireballPic 150 (_damage tower) (convertPos pos) (projectile target)
   projectiles %|>>= Just fireballObj
   updateTower pos (canShoot .~ False) -- After this function is called, we restrict shooting of this tower no matter what.
   addEvent 2000 "Allow shooting" $ updateTower pos (canShoot .~ True)
@@ -280,7 +280,7 @@ inflictDamage moRef damage = do
       inflictDamage' :: Maybe Monster -> SW (Maybe Monster)
       inflictDamage' Nothing = return Nothing
       inflictDamage' (Just monster)
-        | monster ^. health < damage = return Nothing -- Monster dies
+        | monster ^. health < damage = Nothing <$ giveGold (monster ^. goldYield)-- Monster dies
         | otherwise = do
           let newMonster = monster & health -~ damage
           return $ Just newMonster
