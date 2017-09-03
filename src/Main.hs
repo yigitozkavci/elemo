@@ -38,6 +38,7 @@ import           Game.Types
 import           Game.Utils
 import           Game.Impure                      (readTowers)
 import           Game.Direction
+import           Game.Pathfinding
 --------------------------------------------------------------------------------
 
 adjustPosToIndex :: (Float, Float) -> TilePosition
@@ -118,6 +119,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
       >>> map (first show)
       >>> smallTexts
       $ _schedEvents world
+
 --------------------------------------------------------------------------------
 
 tilegenLevel' :: SW ()
@@ -232,7 +234,7 @@ findClosestMonster pos range =
 
 targetExists :: PM.PMRef Monster -> SW Bool
 targetExists moRef =
-  isJust . PM.lookup moRef <$> use monsters
+  use monsters <&> isJust . PM.lookup moRef
 
 inRange :: AbsolutePosition -> Int -> PM.PMRef Monster -> SW Bool
 inRange pos range moRef =
