@@ -12,12 +12,6 @@ data Direction =
   | DDown
   deriving (Show, Eq, Ord)
 
-oppositeDir :: Direction -> Direction
-oppositeDir DRight = DLeft
-oppositeDir DLeft  = DRight
-oppositeDir DUp    = DDown
-oppositeDir DDown  = DUp
-
 serializeDir :: Direction -> TilePosition
 serializeDir = TilePosition . go
   where

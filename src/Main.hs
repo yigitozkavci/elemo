@@ -149,9 +149,9 @@ update = do
   tilegenGUI'
   use builtTowers >>= (wTileMap <>=)
   consumeSchedEvents
-  PM.assocs <$> use monsters >>= mapM_ moveMonster
-  PM.assocs <$> use projectiles >>= mapM_ moveProjectile
-  Map.assocs <$> use builtTowers >>= mapM_ handleTowerShooting
+  use monsters <&> PM.assocs >>= mapM_ moveMonster
+  use projectiles <&> PM.assocs >>= mapM_ moveProjectile
+  use builtTowers <&> Map.assocs >>= mapM_ handleTowerShooting
   globalTime += 1
 
   where
@@ -219,17 +219,16 @@ addEvent time' description ev = do
   schedEvents <>= Heap.singleton (Heap.Entry (globalTime' + time') (description, ev))
 
 findClosestMonster :: AbsolutePosition -> Int -> SW (Maybe (PM.PMRef Monster))
-findClosestMonster pos range = do
-  monsters' <- use monsters
-  return $ monsters' & findClosest
+findClosestMonster pos range =
+  use monsters <&> f
     where
-      findClosest :: PM.Map Monster -> Maybe (PM.PMRef Monster)
-      findClosest = PM.assocsJust
+      f :: PM.Map Monster -> Maybe (PM.PMRef Monster)
+      f =   PM.assocsJust
         >>> map (second (fst . _currVec)) -- [(ref, pos)]
         >>> sortBy (\(_, p1) (_, p2) -> compare (distance pos p1) (distance pos p2)) -- Sorted [(ref, pos)]
         >>> filter (\(_, pos') -> distance pos pos' < range)
         >>> headMay -- Maybe (ref, pos)
-        >=> Just . fst -- Maybe ref
+        >=> Just . fst -- I wish precedence of >>> and <&> wouldn't be equal...
 
 targetExists :: PM.PMRef Monster -> SW Bool
 targetExists moRef =
@@ -237,7 +236,7 @@ targetExists moRef =
 
 inRange :: AbsolutePosition -> Int -> PM.PMRef Monster -> SW Bool
 inRange pos range moRef =
-  PM.lookup moRef <$> use monsters >>= \case
+  use monsters <&> PM.lookup moRef >>= \case
     Nothing -> return False
     Just monster -> return $ distance pos (fst (_currVec monster)) < range
 
@@ -348,7 +347,7 @@ moveWithDir (TilePosition dir) = (+.) $ AbsolutePosition (dir & both %~ fromInte
 --------------------------------------------------------------------------------
 
 guiClick :: (Float, Float) -> SW (Maybe UIObject)
-guiClick pos = Map.lookup (adjustPosToIndex pos) <$> use wTileMap
+guiClick pos = use wTileMap <&> Map.lookup (adjustPosToIndex pos)
 
 buyTower :: Tower -> SW Bool
 buyTower tower = do
