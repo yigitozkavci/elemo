@@ -17,7 +17,7 @@ import           Control.Monad.State              (execStateT, gets, modify)
 import           Data.Foldable                    (toList)
 import qualified Data.Heap                        as Heap
 import           Data.List                        (sortBy)
-import qualified Data.Map                         as Map
+import qualified Data.Map.Extra                   as Map
 import           Data.Maybe                       (fromMaybe, isJust, mapMaybe)
 import           Data.Monoid                      (mempty, (<>))
 import qualified Data.Sequence                    as Seq
@@ -149,9 +149,9 @@ update = do
   tilegenGUI'
   use builtTowers >>= (wTileMap <>=)
   consumeSchedEvents
-  use monsters <&> PM.assocs >>= mapM_ moveMonster
-  use projectiles <&> PM.assocs >>= mapM_ moveProjectile
-  use builtTowers <&> Map.assocs >>= mapM_ handleTowerShooting
+  use monsters >>= PM.assocM_ moveMonster
+  use projectiles >>= PM.assocM_ moveProjectile
+  use builtTowers >>= Map.assocM_ handleTowerShooting
   globalTime += 1
 
   where

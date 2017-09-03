@@ -80,3 +80,5 @@ mapMWithKey' f ((ref, val):xs) = liftA2 (:) ((ref,) <$> f ref val) (mapMWithKey'
 assocsJust :: Map v -> [(PMRef v, v)]
 assocsJust = Prelude.map (second fromJust) . filter (isJust . snd) . Prelude.map (first PMRef) . IM.assocs
 
+assocM_ :: Monad m => ((PMRef v, Maybe v) -> m ()) -> Map v -> m ()
+assocM_ f m = mapM_ f (assocs m)
