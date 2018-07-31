@@ -18,15 +18,17 @@ data GUIAssets = GUIAssets
   }
 
 data Assets = Assets
-  { _grass      :: Picture
-  , _closedDoor :: Picture
-  , _stone      :: Picture
-  , _openDoor   :: Picture
-  , _cursor     :: Picture
-  , _whiteTower :: Picture
-  , _greenTower :: Picture
-  , _moAssets   :: MOAssets
-  , _guiAssets  :: GUIAssets
+  { _grass        :: Picture
+  , _closedDoor   :: Picture
+  , _stone        :: Picture
+  , _openDoor     :: Picture
+  , _cursor       :: Picture
+  , _whiteTower   :: Picture
+  , _greenTower   :: Picture
+  , _moAssets     :: MOAssets
+  , _guiAssets    :: GUIAssets
+  , _yellowButton :: Picture
+  , _logo         :: Picture
   }
 
 makeLenses ''MOAssets
@@ -49,5 +51,7 @@ genAssets = do
   _guiAssets  <- do
     _brick <- loadBMP "assets/dc-dngn/wall/brick_brown0.bmp"
     return GUIAssets {..}
+  _yellowButton <- loadBMP "assets/button.bmp"
+  _logo <- loadBMP "assets/logo.bmp"
   return Assets {..}
 

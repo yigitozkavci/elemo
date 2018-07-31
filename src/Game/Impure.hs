@@ -16,6 +16,7 @@ data RawTower = RawTower
   , _rawTowerRange :: Int
   , _rawTowerCost :: Int
   , _rawTowerPicPath :: FilePath
+  , _rawTowerPeriod :: Int
   }
 
 instance Y.FromJSON RawTower where
@@ -25,11 +26,12 @@ instance Y.FromJSON RawTower where
       <*> v Y..: "range"
       <*> v Y..: "cost"
       <*> v Y..: "picturePath"
+      <*> v Y..: "period"
 
 fromRawTower :: RawTower -> IO Tower
-fromRawTower (RawTower damage range cost picPath) = do
+fromRawTower (RawTower damage range cost picPath period) = do
   image <- loadBMP picPath
-  return $ Tower damage image range cost TowerNonLocked True
+  return $ Tower damage period image range cost TowerNonLocked True
 
 readTowers :: IO (Seq.Seq Tower)
 readTowers = do

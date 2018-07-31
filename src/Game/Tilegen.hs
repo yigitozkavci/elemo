@@ -43,7 +43,7 @@ tilegenLevel _ = do
 
 paintGUI :: Assets -> GUIState -> Picture
 paintGUI assets state =
-  _picture $ execTilegen assets (tilegenGUI state)
+  _picture (execTilegen assets (tilegenGUI state))
 
 tilegenGUI :: GUIState -> TilegenM ()
 tilegenGUI state = do

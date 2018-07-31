@@ -51,6 +51,12 @@ data SelectorState =
     MouseFree
   | SelectedItem Tower
 
+data GameScreen =
+    Menu ((Float, Float) -> SW ())
+  | Playing
+  | End
+  | Quit
+
 data World = World
   { _level         :: Int
   , _levelPic      :: Picture
@@ -67,6 +73,7 @@ data World = World
   , _projectiles   :: PM.Map Projectile
   , _playerInfo    :: PlayerInfo
   , _alerts        :: Q.Queue T.Text
+  , _gameScreen    :: GameScreen
   }
 
 newtype SW a = SW { runSW :: StateT World (LoggingT IO) a }
@@ -104,6 +111,7 @@ data TowerLockState =
 
 data Tower = Tower
   { _damage    :: Int
+  , _period    :: Int
   , _image     :: Picture
   , _range     :: Int
   , _towerCost :: Int

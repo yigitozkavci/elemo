@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,6 +9,8 @@ module Main where
 --------------------------------------------------------------------------------
 import           Control.Applicative.Extended
 import           Control.Arrow.Extended
+import Control.Concurrent
+import Data.Functor (($>))
 import           Control.Lens                     hiding (inside)
 import           Control.Lens.Operators
 import           Control.Monad
@@ -29,6 +32,8 @@ import qualified Data.Yaml                        as Y
 import           Graphics.Gloss                   hiding (blank, display)
 import           Graphics.Gloss.Interface.IO.Game
 import           Safe                             (headMay)
+import qualified System.Exit                      as Ex
+import           Control.Monad.IO.Class           (liftIO)
 --------------------------------------------------------------------------------
 import qualified Data.PreservedMap                as PM
 import           Game.Assets
@@ -50,24 +55,43 @@ adjustPosToIndex = TilePosition .
   )
 
 displayIO :: World -> IO Picture
-displayIO = return . display
+displayIO = pure . display
 
 display :: World -> Picture
-display world = paintGUI (world ^. assets) (world ^. guiState)
-             <> _levelPic world
-             <> getPicture (world ^. monsters)
-             <> getPicture (world ^. projectiles)
-             <> mouseCursor
-             <> getPicture (world ^. builtTowers)
-             <> towerLockings
-             <> towerRanges
-             <> Translate (-300) 300 (getPicture (world ^. playerInfo))
-             <> Translate 200 (-60) (smallText "ALERTS")
-             <> Translate 200 (-70) (smallText "======")
-             <> Translate 200 (-100) paintAlerts
-             <> Translate (-200) (-60) (smallText "EVENTS")
-             <> Translate (-200) (-70) (smallText "======")
-             <> Translate (-200) (-100) eventDebugScreen
+display world =
+  ($ world) $
+    case _gameScreen world of
+      Menu _ -> drawMenu 
+      _ -> drawGame
+
+drawMenu :: World -> Picture
+drawMenu world =
+     Translate 0 150 (world ^. assets . logo)
+  <> mkButton "Start Game"
+  <> Translate 0 (-100) (mkButton "Quit")
+  where
+    mkButton :: String -> Picture
+    mkButton text =
+         world ^. assets . yellowButton
+      <> Translate (-100) (-5) (Scale 0.25 0.25 (Text text))
+
+drawGame :: World -> Picture
+drawGame world =
+      paintGUI (world ^. assets) (world ^. guiState)
+   <> _levelPic world
+   <> getPicture (world ^. monsters)
+   <> getPicture (world ^. projectiles)
+   <> mouseCursor
+   <> getPicture (world ^. builtTowers)
+   <> towerLockings
+   <> towerRanges
+   <> Translate (-300) 300 (getPicture (world ^. playerInfo))
+   <> Translate 200 (-60) (smallText "ALERTS")
+   <> Translate 200 (-70) (smallText "======")
+   <> Translate 200 (-100) paintAlerts
+   <> Translate (-200) (-60) (smallText "EVENTS")
+   <> Translate (-200) (-70) (smallText "======")
+   <> Translate (-200) (-100) eventDebugScreen
   where
     mouseCursor :: Picture
     mouseCursor = case world ^. selectorState of
@@ -90,7 +114,7 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     lineAbs xs = Line $ map (\(AbsolutePosition pos) -> pos) xs
 
     towerLocking :: (TilePosition, UIObject) -> Picture
-    towerLocking (pos, UITower (Tower _ pic range cost (TowerLocked moRef) _)) =
+    towerLocking (pos, UITower (Tower _ _ pic range cost (TowerLocked moRef) _)) =
       case PM.lookup moRef (_monsters world) of
         Just mo ->
           Color red $ lineAbs [convertPos pos, fst (_currVec mo)]
@@ -101,8 +125,8 @@ display world = paintGUI (world ^. assets) (world ^. guiState)
     towerRanges = _builtTowers >>> Map.assocs >>> map towerRange >>> mconcat $ world
 
     towerRange :: (TilePosition, UIObject) -> Picture
-    towerRange (pos, UITower (Tower _ _ range _ _ _)) =
-      translateImg (convertPos pos, Color yellow $ Circle (fromIntegral range))
+    towerRange (pos, UITower (Tower {_range = range })) =
+      translateImg (convertPos pos, Color (makeColor 255.0 255.0 0.0 0.3) $ Circle (fromIntegral range))
 
     paintAlerts :: Picture
     paintAlerts = paintAlerts' (_alerts world)
@@ -147,15 +171,18 @@ updateMonster moRef f =
 
 update :: SW ()
 update = do
-  tilegenLevel'
-  tilegenGUI'
-  use builtTowers >>= (wTileMap <>=)
-  consumeSchedEvents
-  use monsters >>= PM.assocM_ moveMonster
-  use projectiles >>= PM.assocM_ moveProjectile
-  use builtTowers >>= Map.assocM_ handleTowerShooting
-  globalTime += 1
-
+  use gameScreen >>= \case
+    Menu _ -> pure ()
+    Playing -> do
+      tilegenLevel'
+      tilegenGUI'
+      use builtTowers >>= (wTileMap <>=)
+      consumeSchedEvents
+      use monsters >>= PM.assocM_ moveMonster
+      use projectiles >>= PM.assocM_ moveProjectile
+      use builtTowers >>= Map.assocM_ handleTowerShooting
+      globalTime += 1
+    Quit -> liftIO (Ex.exitWith Ex.ExitSuccess)
   where
     moveMonster :: (PM.PMRef Monster, Maybe Monster) -> SW ()
     moveMonster (_, Nothing) = return ()
@@ -184,11 +211,11 @@ update = do
           consumeSchedEvents
 
     handleTowerShooting :: (TilePosition, UIObject) -> SW ()
-    handleTowerShooting (pos, UITower tower@(Tower _dmg _pic range _cost lockState' canShoot')) = do
+    handleTowerShooting (pos, UITower tower@(Tower { _range, _lockState, _canShoot })) = do
       monsters' <- use monsters
-      case lockState' of
+      case _lockState of
         TowerNonLocked ->
-          findClosestMonster (convertPos pos) range >>= \case
+          findClosestMonster (convertPos pos) _range >>= \case
             Nothing    -> return () -- Tower non locked and couldn't find a target
             Just moRef ->
               lockTower pos moRef
@@ -197,9 +224,9 @@ update = do
             Nothing ->
               unlockTower pos
             Just monster -> do
-              inRange' <- inRange (convertPos pos) range moRef
+              inRange' <- inRange (convertPos pos) _range moRef
               if inRange' then
-                when canShoot' $ shoot (pos, tower) range moRef
+                when _canShoot $ shoot (pos, tower) _range moRef
               else
                 unlockTower pos
 
@@ -249,7 +276,7 @@ shoot (pos, tower) range target = do
   let fireballObj = Projectile fireballPic 150 (_damage tower) (convertPos pos) (projectile target)
   projectiles %|>>= Just fireballObj
   updateTower pos (canShoot .~ False) -- After this function is called, we restrict shooting of this tower no matter what.
-  addEvent 2000 "Allow shooting" $ updateTower pos (canShoot .~ True)
+  addEvent (tower ^. period) "Allow shooting" $ updateTower pos (canShoot .~ True)
 
 updateIO :: Float -> World -> IO World
 updateIO _ world = runStdoutLoggingT $ flip execStateT world $ runSW update
@@ -364,22 +391,27 @@ eventHandler = \case
   EventMotion pos ->
     mousePos .= pos
   EventKey (MouseButton LeftButton) Down _modifiers pos ->
-    use selectorState >>= \case
-      MouseFree ->
-        guiClick pos >>= \case
-          Just (UITower tower) -> selectorState .= SelectedItem tower
-          _ -> return ()
-      SelectedItem tower ->
-        guiClick pos >>= \case
-          Just (Floor True tile) ->
-            buyTower tower >>= \case
-              True -> do
-                builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
-                wTileMap %= Map.insert (adjustPosToIndex pos) (Floor False tile)
-              False -> do
-                alerts' <- use alerts
-                addAlert "Not enough gold!"
-          _ -> return ()
+    use gameScreen >>= \case
+      Menu consumer -> do
+        consumer pos
+        logInfo (T.pack (show pos))
+      _ ->
+        use selectorState >>= \case
+          MouseFree ->
+            guiClick pos >>= \case
+              Just (UITower tower) -> selectorState .= SelectedItem tower
+              _ -> return ()
+          SelectedItem tower ->
+            guiClick pos >>= \case
+              Just (Floor True tile) ->
+                buyTower tower >>= \case
+                  True -> do
+                    builtTowers %= Map.insert (adjustPosToIndex pos) (UITower tower)
+                    wTileMap %= Map.insert (adjustPosToIndex pos) (Floor False tile)
+                  False -> do
+                    alerts' <- use alerts
+                    addAlert "Not enough gold!"
+              _ -> return ()
   EventKey (MouseButton RightButton) Down _modifiers _pos ->
     selectorState .= MouseFree
   _ -> return ()
@@ -446,16 +478,19 @@ registerLevelEvents = do
   case level of
     1 -> do
       pushMonsters (Just 1000) 1 500 =<< getCentaur
-      giveGold 70
+      giveGold 50
       nextLevelIn 7000
     2 -> do
       pushMonsters (Just 500) 2 500 =<< getCentaur
-      giveGold 70
-      nextLevelIn 12000 -- Go to next level after 15 secs. (disabled for now)
+      giveGold 60
+      nextLevelIn 10000
     3 -> do
       pushMonsters (Just 500) 4 500 =<< getCentaur
+      giveGold 70
+      nextLevelIn 10000
+    4 -> do
+      pushMonsters (Just 500) 20 500 =<< getCentaur
       giveGold 100
-      -- nextLevelIn 5000 -- Go to next level after 15 secs. (disabled for now)
     other -> error $ "Events for level is not implemented: " <> show other
 
 nextLevelIn :: Int -> SW ()
@@ -469,6 +504,18 @@ nextLevel :: SW ()
 nextLevel = do
   level += 1
   registerLevelEvents
+
+handleMenuClick :: (Float, Float) -> SW ()
+handleMenuClick (x, y)
+  | x >= -140 && x <= 140 =
+    if y >= -40 && y <= 40
+      then gameScreen .= Playing
+    else if y >= -140 && y <= -60
+      then gameScreen .= Quit
+    else
+      pure ()
+  | otherwise
+    = pure ()
 
 initWorld :: Assets -> Seq.Seq Tower -> World
 initWorld assets towers = World
@@ -486,6 +533,7 @@ initWorld assets towers = World
   , _projectiles   = PM.empty
   , _playerInfo    = PlayerInfo 10 0
   , _alerts        = Q.empty
+  , _gameScreen    = Menu handleMenuClick
   }
 
 gameFreq :: Int
@@ -497,7 +545,7 @@ main = do
   towers <- readTowers
   initWorld' <- runStdoutLoggingT $ flip execStateT (initWorld assets towers) $ runSW nextLevel
   playIO
-    (InWindow "Nice Window" (700, 700) (0, 0))
+    (InWindow "Elemo" (700, 700) (0, 0))
     white
     gameFreq
     initWorld'

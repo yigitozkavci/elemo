@@ -1,8 +1,10 @@
-- damage: 20
+- damage: 10
+  period: 250
   range: 50
-  cost: 20
+  cost: 30
   picturePath: "assets/dc-dngn/altars/dngn_altar_elyvilon.bmp"
 - damage: 50
+  period: 1000
   range: 100
   cost: 40
   picturePath: "assets/dc-dngn/altars/dngn_altar_jiyva02.bmp"
